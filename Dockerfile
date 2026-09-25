@@ -6,6 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/decision-api ./cmd/decision-api
 
 FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
 RUN adduser -D -u 10001 app
 COPY --from=build /out/decision-api /usr/local/bin/decision-api
 USER app

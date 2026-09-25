@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS decisions (
 	latency_ms     BIGINT NOT NULL DEFAULT 0,
 	created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Идемпотентность: повторный transaction_id не пишет дубль.
+-- DO-блок — безопасная миграция для уже созданных баз.
+DO $$ BEGIN
+	ALTER TABLE decisions ADD CONSTRAINT decisions_txn_unique UNIQUE (transaction_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS idx_decisions_created_at ON decisions (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_decisions_user_id ON decisions (user_id);
 `
@@ -74,7 +79,7 @@ type Entry struct {
 func (s *Store) Save(ctx context.Context, r Record) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO decisions (request_id, transaction_id, user_id, amount, currency, ip, decision, reasons, latency_ms)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (transaction_id) DO NOTHING`,
 		r.RequestID, r.TransactionID, r.UserID, r.Amount, r.Currency, r.IP, r.Decision, r.Reasons, r.LatencyMS)
 	return err
 }

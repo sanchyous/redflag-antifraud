@@ -90,13 +90,17 @@ func TestDecisionAllowCleanTxn(t *testing.T) {
 
 func TestDecisionReviewOnVelocityBurst(t *testing.T) {
 	h := testServer(t, 2) // лимит 2 транзакции на пользователя
-	txn := `{"transaction_id":"t3","user_id":"u-burst","amount":10,"currency":"RUB","ip":"9.9.9.9"}`
-	for i := 0; i < 2; i++ {
-		if rec := postDecision(t, h, txn, nil); rec.Code != http.StatusOK {
-			t.Fatalf("iteration %d: status = %d", i, rec.Code)
+	// Серия транзакций с разными transaction_id: одинаковый id был бы подавлен
+	// дедупом идемпотентности (ретрай той же транзакции не кормит velocity).
+	body := func(id string) string {
+		return `{"transaction_id":"` + id + `","user_id":"u-burst","amount":10,"currency":"RUB","ip":"9.9.9.9"}`
+	}
+	for _, id := range []string{"t1", "t2"} {
+		if rec := postDecision(t, h, body(id), nil); rec.Code != http.StatusOK {
+			t.Fatalf("iteration %s: status = %d", id, rec.Code)
 		}
 	}
-	rec := postDecision(t, h, txn, nil)
+	rec := postDecision(t, h, body("t3"), nil)
 	var v struct {
 		Decision string   `json:"decision"`
 		Reasons  []string `json:"reasons"`

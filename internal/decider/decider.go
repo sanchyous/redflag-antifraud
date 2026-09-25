@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sanchyous/redflag-antifraud/internal/decision"
@@ -14,18 +15,24 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/velocity"
 )
 
-const externalScorerTimeout = 2 * time.Second
+// HTTPTimeout — таймаут вызова внешнего scorer (клиент собирается в main).
+const HTTPTimeout = 2 * time.Second
+
+// decisionRank — порядок строгости: внешний вердикт может только усилить решение.
+var decisionRank = map[string]int{decision.Allow: 0, decision.Review: 1, decision.Deny: 2}
 
 type Scorer struct {
 	Rules     rules.Config
 	Vel       *velocity.Limiter
-	ScorerURL string // пусто — внешний scorer не используется
-	HTTP      *http.Client
+	ScorerURL string       // пусто — внешний scorer не используется
+	HTTP      *http.Client // задаётся при сборке в main; nil — http.DefaultClient
+	FailOpen  bool         // true: деградация Redis/scorer не эскалирует вердикт (доступность > детекции)
 	Log       *slog.Logger
 }
 
 // Evaluate прогоняет транзакцию через уровни и логирует решение.
-// Инфраструктурная деградация (Redis/скorer недоступны) не блокирует трафик — уходит reason'ом в вердикт.
+// Инфраструктурная деградация (Redis/scorer недоступны) не блокирует трафик — уходит reason'ом в вердикт.
+// При FAIL_MODE=closed (FailOpen=false) деградация эскалирует вердикт до review.
 func (s *Scorer) Evaluate(ctx context.Context, t decision.Txn, requestID string) decision.Verdict {
 	start := time.Now()
 
@@ -40,11 +47,23 @@ func (s *Scorer) Evaluate(ctx context.Context, t decision.Txn, requestID string)
 		levels = "l1"
 	}
 
+	// Дедуп: повторная транзакция не должна второй раз кормить velocity и scorer.
+	duplicate := false
+	if s.Vel != nil {
+		if seen, _ := s.Vel.MarkSeen(ctx, t.TransactionID); seen {
+			reasons = append(reasons, "duplicate_transaction")
+			duplicate = true
+		}
+	}
+
 	// L2: velocity — срабатывание = review
-	if verdict != decision.Deny && s.Vel != nil {
+	if !duplicate && verdict != decision.Deny && s.Vel != nil {
 		l2, degraded := s.Vel.Check(ctx, t)
 		if degraded {
 			reasons = append(reasons, "velocity_degraded")
+			if !s.FailOpen {
+				verdict = decision.Review
+			}
 		}
 		if len(l2) > 0 {
 			reasons = append(reasons, l2...)
@@ -56,21 +75,28 @@ func (s *Scorer) Evaluate(ctx context.Context, t decision.Txn, requestID string)
 	}
 
 	// Внешний scorer (сервис на любом стеке): score>=0.8 → review, явный decision уважается
-	if verdict != decision.Deny && s.ScorerURL != "" {
+	if !duplicate && verdict != decision.Deny && s.ScorerURL != "" {
 		extReason, extDecision, err := s.callExternal(ctx, t)
 		if err != nil {
 			s.Log.WarnContext(ctx, "external_scorer_error", "request_id", requestID, "err", err.Error())
 			reasons = append(reasons, "external_scorer_error")
+			if !s.FailOpen {
+				verdict = decision.Review
+			}
 		} else {
 			if extReason != "" {
 				reasons = append(reasons, extReason)
 			}
-			if extDecision == decision.Deny {
-				verdict = decision.Deny
-			} else if extDecision == decision.Review || verdict != decision.Review {
-				verdict = decision.Review
+			// Эскалация по строгости: честный allow от scorer не понижает вердикт,
+			// review/deny — усиливают. extDecision нормализован в callExternal.
+			if r, ok := decisionRank[extDecision]; ok && r > decisionRank[verdict] {
+				verdict = extDecision
 			}
 		}
+	}
+
+	if reasons == nil {
+		reasons = []string{} // JSON: [] вместо null
 	}
 
 	v := decision.Verdict{
@@ -114,8 +140,10 @@ type externalResponse struct {
 }
 
 func (s *Scorer) callExternal(ctx context.Context, t decision.Txn) (reason, extDecision string, err error) {
-	if s.HTTP == nil {
-		s.HTTP = &http.Client{Timeout: externalScorerTimeout}
+	// Клиент инициализируется в main; nil допустим только в тестах — http.DefaultClient без таймаута.
+	client := s.HTTP
+	if client == nil {
+		client = http.DefaultClient
 	}
 	body, err := json.Marshal(t)
 	if err != nil {
@@ -126,7 +154,7 @@ func (s *Scorer) callExternal(ctx context.Context, t decision.Txn) (reason, extD
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.HTTP.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -144,7 +172,7 @@ func (s *Scorer) callExternal(ctx context.Context, t decision.Txn) (reason, extD
 	}
 	switch {
 	case out.Decision != "":
-		extDecision = out.Decision
+		extDecision = strings.ToLower(strings.TrimSpace(out.Decision))
 	case out.Score >= 0.8:
 		extDecision = decision.Review
 	}

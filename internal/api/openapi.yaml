@@ -29,6 +29,12 @@ paths:
       description: |
         Прогоняет транзакцию через pipeline и пишет результат в журнал.
         Заголовок `X-Request-Id` можно задать свой — иначе сгенерируется (возвращается в ответе).
+      parameters:
+        - name: X-API-Key
+          in: header
+          required: false
+          description: API-ключ (обязателен, если на сервере задан API_KEY)
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -56,6 +62,8 @@ paths:
                 $ref: "#/components/schemas/Verdict"
         "400":
           description: Некорректный запрос (validation/invalid_json)
+        "401":
+          description: Неверный или отсутствующий X-API-Key
   /v1/decisions/recent:
     get:
       summary: Последние решения из журнала
@@ -63,6 +71,11 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: X-API-Key
+          in: header
+          required: false
+          description: API-ключ (обязателен, если на сервере задан API_KEY)
+          schema: { type: string }
       responses:
         "200":
           description: Список решений (новые первыми)
@@ -77,6 +90,8 @@ paths:
                       $ref: "#/components/schemas/DecisionRecord"
         "503":
           description: Журнал отключён (DATABASE_URL не задан)
+        "401":
+          description: Неверный или отсутствующий X-API-Key
 components:
   schemas:
     Geo:
@@ -93,6 +108,9 @@ components:
         amount: { type: number, example: 15000 }
         currency: { type: string, example: RUB }
         ip: { type: string, example: 192.168.10.55 }
+        device_id: { type: string, description: "Опционально: устройство (резерв Ф2, граф связей)" }
+        card_id: { type: string, description: "Опционально: идентификатор/хеш карты (резерв Ф2)" }
+        merchant_id: { type: string, description: "Опционально: продавец (резерв Ф2)" }
         geo: { $ref: "#/components/schemas/Geo" }
         ts: { type: string, format: date-time }
     Verdict:

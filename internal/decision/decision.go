@@ -1,7 +1,10 @@
 // Package decision содержит общую модель транзакции и вердикта.
 package decision
 
-import "time"
+import (
+	"net"
+	"time"
+)
 
 // Geo — приблизительная геолокация транзакции (для impossible travel, фаза 2).
 type Geo struct {
@@ -10,6 +13,8 @@ type Geo struct {
 }
 
 // Txn — входящая транзакция на проверку.
+// device_id/card_id/merchant_id — резерв под Ф2 (граф связей): присылать можно уже сейчас,
+// ядро их не использует, но контракт не придётся ломать позже.
 type Txn struct {
 	TransactionID string    `json:"transaction_id"`
 	UserID        string    `json:"user_id"`
@@ -17,6 +22,9 @@ type Txn struct {
 	Currency      string    `json:"currency"`
 	IP            string    `json:"ip"`
 	Geo           Geo       `json:"geo"`
+	DeviceID      string    `json:"device_id,omitempty"`
+	CardID        string    `json:"card_id,omitempty"`
+	MerchantID    string    `json:"merchant_id,omitempty"`
 	TS            time.Time `json:"ts"`
 }
 
@@ -51,6 +59,8 @@ func (t Txn) Validate() []string {
 	}
 	if t.IP == "" {
 		errs = append(errs, "ip_required")
+	} else if net.ParseIP(t.IP) == nil {
+		errs = append(errs, "ip_invalid")
 	}
 	return errs
 }

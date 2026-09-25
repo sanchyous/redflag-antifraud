@@ -66,3 +66,60 @@ func TestVelocityDegradedWhenRedisDown(t *testing.T) {
 		t.Fatal("want degraded=true when redis unreachable")
 	}
 }
+
+// Честное скользящее окно: события на границе остаются в счёте.
+// Fixed window на t=61с начал бы новый чистый счётчик — этот тест такое ловит.
+func TestVelocitySlidingWindowCatchesBoundary(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	l := New(rdb, 2, 1000, time.Minute)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	var offset time.Duration
+	l.Now = func() time.Time { return base.Add(offset) }
+	step := func(sec int) bool {
+		offset = time.Duration(sec) * time.Second
+		reasons, degraded := l.Check(context.Background(), txn("u-slide", "10.9.0.1"))
+		if degraded {
+			t.Fatalf("at %ds: unexpected degraded", sec)
+		}
+		return len(reasons) > 0
+	}
+	_ = step(0)  // n=1
+	_ = step(55) // n=2 — в пределах max
+	if !step(59) {
+		t.Fatal("3rd txn in window must trigger (n=3 > max=2)")
+	}
+	// Событие t=0с уже вышло из окна, но 55с+59с+61с = 3 > max.
+	if !step(61) {
+		t.Fatal("sliding window must keep counting 55s+59s at t=61s")
+	}
+}
+
+// EXPIRE не теряется: после Check ключ обязан иметь TTL (иначе счётчик живёт вечно).
+func TestVelocityKeyHasTTL(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	l := New(rdb, 10, 10, time.Minute)
+	if _, degraded := l.Check(context.Background(), txn("u-ttl", "10.9.0.2")); degraded {
+		t.Fatal("unexpected degraded")
+	}
+	ttl := rdb.TTL(context.Background(), "vel:user:u-ttl:60").Val()
+	if ttl <= 0 || ttl > time.Minute {
+		t.Fatalf("key must have TTL within window, got %v", ttl)
+	}
+}
+
+func TestMarkSeenDetectsDuplicate(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	l := New(rdb, 10, 10, time.Minute)
+	ctx := context.Background()
+	seen, err := l.MarkSeen(ctx, "tx-1")
+	if err != nil || seen {
+		t.Fatalf("first sight: seen=%v err=%v", seen, err)
+	}
+	seen, err = l.MarkSeen(ctx, "tx-1")
+	if err != nil || !seen {
+		t.Fatalf("second sight must be duplicate: seen=%v err=%v", seen, err)
+	}
+}

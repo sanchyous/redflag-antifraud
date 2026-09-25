@@ -35,8 +35,11 @@ func main() {
 
 	// Redis — L2. Недоступный Redis на старте не фатален: будет degraded на каждом запросе.
 	rdb := redis.NewClient(&redis.Options{
-		Addr:         cfg.RedisAddr,
-		DialTimeout:  time.Second,
+		Addr: cfg.RedisAddr,
+		// Быстрый отказ: недоступный Redis не должен держать запрос секунды
+		// (дефолт go-redis MaxRetries=3 с dial-timeout — до ~3с на транзакцию).
+		MaxRetries:   0,
+		DialTimeout:  250 * time.Millisecond,
 		ReadTimeout:  500 * time.Millisecond,
 		WriteTimeout: 500 * time.Millisecond,
 	})
@@ -65,15 +68,20 @@ func main() {
 		},
 		Vel:       velocity.New(rdb, cfg.VelocityMaxPerUser, cfg.VelocityMaxPerIP, cfg.VelocityWindow),
 		ScorerURL: cfg.ScorerURL,
+		HTTP:      &http.Client{Timeout: decider.HTTPTimeout},
+		FailOpen:  cfg.FailOpen,
 		Log:       logger,
 	}
 
-	srv := &api.Server{Decider: scorer, Store: st, Log: logger}
+	srv := &api.Server{Decider: scorer, Store: st, APIKey: cfg.APIKey, Log: logger}
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Routes(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -113,25 +121,27 @@ type config struct {
 	VelocityMaxPerUser     int
 	VelocityMaxPerIP       int
 	VelocityWindow         time.Duration
+	APIKey                 string
+	FailOpen               bool
 	LogLevel               string
 	LogFormat              string
 }
 
 func loadConfig() config {
 	return config{
-		Addr:                   env("ADDR", ":8000"),
-		RedisAddr:              env("REDIS_ADDR", "127.0.0.1:6379"),
-		DatabaseURL:            os.Getenv("DATABASE_URL"),
-		ScorerURL:              os.Getenv("SCORER_URL"),
-		RulesMaxAmount:         envFloat("RULES_MAX_AMOUNT", 100000),
-		RulesAllowedCurrencies: env("RULES_ALLOWED_CURRENCIES", "RUB,USD,EUR"),
-		RulesBlockedUsers:      os.Getenv("RULES_BLOCKED_USERS"),
-		RulesBlockedIPs:        os.Getenv("RULES_BLOCKED_IPS"),
-		VelocityMaxPerUser:     envInt("VELOCITY_MAX_PER_USER", 10),
-		VelocityMaxPerIP:       envInt("VELOCITY_MAX_PER_IP", 30),
-		VelocityWindow:         time.Duration(envInt("VELOCITY_WINDOW_SEC", 60)) * time.Second,
-		LogLevel:               env("LOG_LEVEL", "info"),
-		LogFormat:              env("LOG_FORMAT", "text"),
+		Addr:        env("ADDR", ":8000"),
+		RedisAddr:   env("REDIS_ADDR", "127.0.0.1:6379"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		ScorerURL:   os.Getenv("SCORER_URL"),
+		APIKey:      os.Getenv("API_KEY"),
+		// FAIL_MODE=closed: деградация инфраструктуры эскалирует вердикт до review.
+		// Любое другое значение (включая отсутствие) — open.
+		FailOpen:           !strings.EqualFold(os.Getenv("FAIL_MODE"), "closed"),
+		VelocityMaxPerUser: envInt("VELOCITY_MAX_PER_USER", 10),
+		VelocityMaxPerIP:   envInt("VELOCITY_MAX_PER_IP", 30),
+		VelocityWindow:     time.Duration(envInt("VELOCITY_WINDOW_SEC", 60)) * time.Second,
+		LogLevel:           env("LOG_LEVEL", "info"),
+		LogFormat:          env("LOG_FORMAT", "text"),
 	}
 }
 

@@ -19,6 +19,7 @@ const maxBodyBytes = 64 << 10 // 64KB
 type Server struct {
 	Decider *decider.Scorer
 	Store   *store.Store // может быть nil — журнал отключён
+	APIKey  string       // пусто — X-API-Key auth отключён (dev-режим)
 	Log     *slog.Logger
 }
 
@@ -27,8 +28,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /docs", s.handleDocs)
 	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
-	mux.HandleFunc("POST /v1/decisions", s.handleDecision)
-	mux.HandleFunc("GET /v1/decisions/recent", s.handleRecent)
+	mux.Handle("POST /v1/decisions", s.protect(http.HandlerFunc(s.handleDecision)))
+	mux.Handle("GET /v1/decisions/recent", s.protect(http.HandlerFunc(s.handleRecent)))
 	return s.withRequestID(s.withLogging(s.withRecover(mux)))
 }
 
@@ -48,6 +49,11 @@ func (s *Server) handleDecision(w http.ResponseWriter, r *http.Request) {
 	if errs := t.Validate(); len(errs) > 0 {
 		s.badRequest(w, reqID, errs[0])
 		return
+	}
+
+	// Отсутствующий ts — серверное время приёма (клиентские часы не доверяем).
+	if t.TS.IsZero() {
+		t.TS = time.Now().UTC()
 	}
 
 	verdict := s.Decider.Evaluate(r.Context(), t, reqID)

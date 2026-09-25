@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net"
 	"net/http"
@@ -84,4 +85,19 @@ func newRequestID() string {
 		return time.Now().Format("20060102150405")
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// protect включает проверку X-API-Key (constant-time), если ключ задан.
+// Пустой ключ — dev-режим без auth.
+func (s *Server) protect(next http.Handler) http.Handler {
+	if s.APIKey == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(s.APIKey)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

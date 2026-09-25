@@ -1,7 +1,6 @@
 services:
   app:
     build: .
-    container_name: redflag-app
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -17,6 +16,8 @@ services:
       VELOCITY_MAX_PER_IP: "${VELOCITY_MAX_PER_IP:-30}"
       LOG_FORMAT: "json"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
+      API_KEY: "${API_KEY:-}"
+      FAIL_MODE: "${FAIL_MODE:-open}"
     depends_on:
       redis:
         condition: service_healthy
