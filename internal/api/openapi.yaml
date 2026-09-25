@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: RedFlag Antifraud — Decision API
+  description: |
+    Ядро антифрод-pipeline. Принимает транзакцию, прогоняет через уровни:
+    L1 hard rules (blacklist, лимиты) → L2 stateful (velocity в Redis) → внешний scorer (опционально).
+    Возвращает allow / review / deny с причинами.
+  version: 0.1.0
+servers:
+  - url: /
+paths:
+  /health:
+    get:
+      summary: Liveness-проба
+      responses:
+        "200":
+          description: Сервис жив
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /v1/decisions:
+    post:
+      summary: Решение по транзакции
+      description: |
+        Прогоняет транзакцию через pipeline и пишет результат в журнал.
+        Заголовок `X-Request-Id` можно задать свой — иначе сгенерируется (возвращается в ответе).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Transaction"
+            example:
+              transaction_id: txn-0001
+              user_id: user-42
+              amount: 15000
+              currency: RUB
+              ip: 192.168.10.55
+              geo: { lat: 55.75, lon: 37.61 }
+              ts: "2026-09-26T12:00:00Z"
+      responses:
+        "200":
+          description: Вердикт (даже deny — это 200: решение получено)
+          headers:
+            X-Request-Id:
+              schema: { type: string }
+              description: Идентификатор запроса для трассировки в логах
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Verdict"
+        "400":
+          description: Некорректный запрос (validation/invalid_json)
+  /v1/decisions/recent:
+    get:
+      summary: Последние решения из журнала
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Список решений (новые первыми)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DecisionRecord"
+        "503":
+          description: Журнал отключён (DATABASE_URL не задан)
+components:
+  schemas:
+    Geo:
+      type: object
+      properties:
+        lat: { type: number, format: double, example: 55.75 }
+        lon: { type: number, format: double, example: 37.61 }
+    Transaction:
+      type: object
+      required: [transaction_id, user_id, amount, ip]
+      properties:
+        transaction_id: { type: string, example: txn-0001 }
+        user_id: { type: string, example: user-42 }
+        amount: { type: number, example: 15000 }
+        currency: { type: string, example: RUB }
+        ip: { type: string, example: 192.168.10.55 }
+        geo: { $ref: "#/components/schemas/Geo" }
+        ts: { type: string, format: date-time }
+    Verdict:
+      type: object
+      properties:
+        request_id: { type: string }
+        transaction_id: { type: string }
+        user_id: { type: string }
+        decision: { type: string, enum: [allow, review, deny] }
+        reasons:
+          type: array
+          items: { type: string }
+          example: [user_blacklisted]
+        latency_ms: { type: integer, example: 1 }
+    DecisionRecord:
+      type: object
+      properties:
+        transaction_id: { type: string }
+        user_id: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+        ip: { type: string }
+        decision: { type: string, enum: [allow, review, deny] }
+        reasons:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }

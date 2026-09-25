@@ -25,6 +25,8 @@ type Server struct {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /docs", s.handleDocs)
+	mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	mux.HandleFunc("POST /v1/decisions", s.handleDecision)
 	mux.HandleFunc("GET /v1/decisions/recent", s.handleRecent)
 	return s.withRequestID(s.withLogging(s.withRecover(mux)))
