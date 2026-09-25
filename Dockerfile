@@ -1,9 +1,13 @@
-FROM python:3.12-slim
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/decision-api ./cmd/decision-api
 
-WORKDIR /srv
-COPY app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY app/ .
-
+FROM alpine:3.21
+RUN adduser -D -u 10001 app
+COPY --from=build /out/decision-api /usr/local/bin/decision-api
+USER app
 EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/usr/local/bin/decision-api"]
