@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Deploy with docker compose
-        run: docker compose up -d --build
+        run: docker compose --env-file /home/deploy/redflag/.env up -d --build
       - name: Health check
         run: |
           for i in $(seq 1 30); do
