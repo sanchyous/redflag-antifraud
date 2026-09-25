@@ -45,7 +45,7 @@ paths:
               ts: "2026-09-26T12:00:00Z"
       responses:
         "200":
-          description: Вердикт (даже deny — это 200: решение получено)
+          description: "Вердикт (даже deny — это 200: решение получено)"
           headers:
             X-Request-Id:
               schema: { type: string }
