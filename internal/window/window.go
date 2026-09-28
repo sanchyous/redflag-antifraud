@@ -72,6 +72,7 @@ type Features struct {
 const (
 	fOut      uint8 = 1
 	fAnswered uint8 = 2
+	fForeign  uint8 = 4 // вход из-за рубежа (для профилей графа)
 )
 
 type entry struct {
@@ -141,6 +142,10 @@ func (s *Store) Observe(ev *callrec.Event) Features {
 
 	outFlags := fOut
 	inFlags := uint8(0)
+	if ev.Flags&callrec.FlagForeignIngress != 0 {
+		outFlags |= fForeign
+		inFlags |= fForeign
+	}
 	if answered {
 		outFlags |= fAnswered
 		inFlags |= fAnswered
@@ -389,4 +394,73 @@ func (s *Store) Sweep(now int64) int {
 		sh.mu.Unlock()
 	}
 	return removed
+}
+
+// Profile — поведенческий профиль звонящего номера для графового анализа.
+type Profile struct {
+	Key           uint64
+	Calls         uint32
+	Peers         []uint64 // уникальные получатели за период
+	UnansweredShr float32
+	MeanDurSec    float32 // средняя длительность принятых
+	GapMeanSec    float32 // средний интервал между вызовами, 0 — мало данных
+	ForeignShare  float32
+}
+
+// Profiles возвращает профили звонящих номеров, у которых за последние span секунд
+// не менее minCalls исходящих. Снимок делается по шардам под локом каждого и
+// копирует данные, поэтому вызывать нужно нечасто (раз в десятки секунд).
+func (s *Store) Profiles(now int64, span uint32, minCalls int) []Profile {
+	cur := clampTS(now)
+	var out []Profile
+	var tsBuf []uint32
+	seen := make(map[uint64]struct{}, 64)
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		for key, st := range sh.m {
+			var calls, unans, ans, foreign uint32
+			var durSum float64
+			tsBuf = tsBuf[:0]
+			clear(seen)
+			var peers []uint64
+			for j := range st.ents {
+				e := &st.ents[j]
+				if e.flags&fOut == 0 || e.ts > cur || cur-e.ts >= span {
+					continue
+				}
+				calls++
+				tsBuf = append(tsBuf, e.ts)
+				if e.flags&fAnswered != 0 {
+					ans++
+					durSum += float64(e.dur)
+				} else {
+					unans++
+				}
+				if e.flags&fForeign != 0 {
+					foreign++
+				}
+				if _, dup := seen[e.peer]; !dup {
+					seen[e.peer] = struct{}{}
+					peers = append(peers, e.peer)
+				}
+			}
+			if int(calls) < minCalls {
+				continue
+			}
+			p := Profile{Key: key, Calls: calls, Peers: peers,
+				UnansweredShr: float32(unans) / float32(calls),
+				ForeignShare:  float32(foreign) / float32(calls)}
+			if ans > 0 {
+				p.MeanDurSec = float32(durSum / float64(ans))
+			}
+			if len(tsBuf) >= 3 {
+				slices.Sort(tsBuf)
+				p.GapMeanSec = float32(float64(tsBuf[len(tsBuf)-1]-tsBuf[0]) / float64(len(tsBuf)-1))
+			}
+			out = append(out, p)
+		}
+		sh.mu.Unlock()
+	}
+	return out
 }

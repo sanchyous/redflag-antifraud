@@ -266,3 +266,25 @@ func BenchmarkObserveHeavyNumber(b *testing.B) {
 		s.Observe(ev(1, uint64(i), t0+int64(i/3), 3, true, uint16(i%90), 5))
 	}
 }
+
+func TestProfiles(t *testing.T) {
+	s := New(Config{})
+	for i := 0; i < 12; i++ { // номер 1: 12 вызовов на 12 разных, 3 с, каждые 10 с, из-за рубежа
+		e := ev(1, uint64(100+i), t0+int64(i*10), 3, true, 0, 0)
+		e.Flags |= callrec.FlagForeignIngress
+		s.Observe(e)
+	}
+	for i := 0; i < 3; i++ { // номер 2: слишком мало вызовов
+		s.Observe(ev(2, uint64(900+i), t0+int64(i), 3, true, 0, 0))
+	}
+	s.Observe(ev(3, 1, t0-5000, 3, true, 0, 0)) // старый вызов вне периода
+	ps := s.Profiles(t0+200, 3600, 10)
+	if len(ps) != 1 || ps[0].Key != 1 {
+		t.Fatalf("profiles = %+v", ps)
+	}
+	p := ps[0]
+	if p.Calls != 12 || len(p.Peers) != 12 || !near(p.MeanDurSec, 3) || !near(p.GapMeanSec, 10) ||
+		!near(p.ForeignShare, 1) || p.UnansweredShr != 0 {
+		t.Fatalf("profile = %+v", p)
+	}
+}
