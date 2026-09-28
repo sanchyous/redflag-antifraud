@@ -160,6 +160,43 @@ func (n Number) ID(key []byte) (id string, ok bool) {
 	return hex.EncodeToString(m.Sum(nil))[:32], true
 }
 
+// Ключи номеров: компактный uint64 для карт и окон без строк в горячем пути.
+//
+//	полный номер:      значение цифр (< 10^15, старшие биты нули)
+//	короткий номер:    1<<62 | длина<<50 | значение
+//	маскированный:     1<<63 | 63-битный FNV-1a от цифр и '*'
+const (
+	keyShort  = uint64(1) << 62
+	keyMasked = uint64(1) << 63
+)
+
+// Key возвращает стабильный uint64-идентификатор номера. Разные записи одного и того же
+// номера ("8916…" и "+7 916…") дают один ключ. Маскированные номера получают ключ
+// по маске: две одинаковые маски неразличимы, это ограничение данных.
+func (n Number) Key() uint64 {
+	switch {
+	case n.Short:
+		var v uint64
+		for i := 0; i < len(n.Digits); i++ {
+			v = v*10 + uint64(n.Digits[i]-'0')
+		}
+		return keyShort | uint64(len(n.Digits))<<50 | v
+	case n.Masked:
+		h := uint64(14695981039346656037)
+		for i := 0; i < len(n.Digits); i++ {
+			h ^= uint64(n.Digits[i])
+			h *= 1099511628211
+		}
+		return keyMasked | h>>1
+	default:
+		var v uint64
+		for i := 0; i < len(n.Digits); i++ {
+			v = v*10 + uint64(n.Digits[i]-'0')
+		}
+		return v
+	}
+}
+
 // lookupCountry определяет код страны и ISO по началу E.164-цифр.
 func lookupCountry(d string) (cc, iso string, ok bool) {
 	switch d[0] {

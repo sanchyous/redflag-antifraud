@@ -35,6 +35,10 @@ type Info struct {
 	Region   string // "" если в найденных диапазонах регионов несколько
 	NonGeo   bool   // безгеографический диапазон (8-800 и т.п.)
 
+	// RegionID — компактный идентификатор региона (1..N), 0 — регион не определён
+	// (не найден или под маской несколько регионов). Для множеств и окон без строк.
+	RegionID uint16
+
 	MultiOperator bool // под маской подходят диапазоны разных операторов
 	MultiRegion   bool // ...и разных регионов
 }
@@ -275,9 +279,21 @@ func (p *Plan) LookupPrefix(prefix string) (Info, bool) {
 	if !info.MultiRegion {
 		info.Region = p.regs[reg].name
 		info.NonGeo = p.regs[reg].nonGeo
+		info.RegionID = uint16(reg + 1)
 	}
 	return info, true
 }
+
+// RegionName возвращает название по идентификатору из Info.RegionID.
+func (p *Plan) RegionName(id uint16) string {
+	if id == 0 || int(id) > len(p.regs) {
+		return ""
+	}
+	return p.regs[id-1].name
+}
+
+// RegionCount — число различных регионов в справочнике.
+func (p *Plan) RegionCount() int { return len(p.regs) }
 
 // Size — число диапазонов.
 func (p *Plan) Size() int { return len(p.ranges) }

@@ -174,6 +174,39 @@ func TestCountryTablesConsistent(t *testing.T) {
 	}
 }
 
+func TestKey(t *testing.T) {
+	a, _ := Parse("+7 916 123-45-67")
+	b, _ := Parse("89161234567")
+	c, _ := Parse("+7 916 123-45-68")
+	if a.Key() != b.Key() || a.Key() == c.Key() {
+		t.Fatal("key must be format-independent and number-specific")
+	}
+	if a.Key() != 79161234567 {
+		t.Fatalf("complete key = %d", a.Key())
+	}
+	s1, _ := Parse("112")
+	s2, _ := Parse("0112")
+	if s1.Key() == s2.Key() {
+		t.Fatal("short numbers with different length must differ")
+	}
+	m1, _ := Parse("+7 495 ***-**-12")
+	m2, _ := Parse("+7 495 ***-**-13")
+	if m1.Key() == m2.Key() || m1.Key()&keyMasked == 0 {
+		t.Fatalf("masked keys: %x %x", m1.Key(), m2.Key())
+	}
+	if a.Key()&(keyShort|keyMasked) != 0 || s1.Key()&keyMasked != 0 {
+		t.Fatal("key classes overlap")
+	}
+}
+
+func BenchmarkParse(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		n, _ := Parse("+7 (916) 123-45-67")
+		_ = n.Key()
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{"+7 916 123-45-67", "112", "8 10 49 30", "+7 495 ***-**-12", "", "\x00"} {
 		f.Add(s)

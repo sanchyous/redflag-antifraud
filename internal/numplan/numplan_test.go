@@ -136,6 +136,24 @@ func TestMultiRegionUnderCode(t *testing.T) {
 	}
 }
 
+func TestRegionID(t *testing.T) {
+	p := mustPlan(t, fixture)
+	a, _ := p.Lookup(num(t, "+7 495 000-99-99"))
+	b, _ := p.Lookup(num(t, "+7 916 123-45-67"))
+	c, _ := p.Lookup(num(t, "+7 401 220-05-00"))
+	if a.RegionID == 0 || a.RegionID != b.RegionID || a.RegionID == c.RegionID {
+		t.Fatalf("ids: %d %d %d (Москва и МО должны совпасть)", a.RegionID, b.RegionID, c.RegionID)
+	}
+	if p.RegionName(c.RegionID) != "Калининградская область" || p.RegionName(0) != "" || p.RegionName(9999) != "" {
+		t.Fatal("RegionName mismatch")
+	}
+	if p.RegionCount() < 3 {
+		t.Fatalf("RegionCount = %d", p.RegionCount())
+	}
+	multi, _ := p.LookupPrefix("902")
+	_ = multi
+}
+
 func TestOverlapsDetected(t *testing.T) {
 	p := mustPlan(t,
 		"АВС/ DEF;От;До;Емкость;Оператор;Регион;Территория ГАР;ИНН\n"+
