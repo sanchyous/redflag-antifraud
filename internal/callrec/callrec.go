@@ -65,12 +65,13 @@ type Call struct {
 const (
 	maxDurationSec = 24 * 3600
 	maxIDLen       = 128
-	maxFutureSkew  = time.Hour
 )
 
 // Validate проверяет структурную целостность входа (не антифрод). Возвращает коды ошибок.
-// now нужен для проверки «вызов из будущего»; нулевой StartedAt допустим — его подставит сервис.
-func (c *Call) Validate(now time.Time) []string {
+// maxFuture > 0 включает проверку «вызов из будущего» (допустимый уход часов вперёд); 0 — проверка
+// выключена (нужно при проигрывании исторических данных и когда часы источника не синхронизированы).
+// Нулевой StartedAt допустим — его подставит сервис.
+func (c *Call) Validate(now time.Time, maxFuture time.Duration) []string {
 	var errs []string
 	if c.CallID == "" {
 		errs = append(errs, "call_id_required")
@@ -85,7 +86,7 @@ func (c *Call) Validate(now time.Time) []string {
 	} else if c.DurationSec > maxDurationSec {
 		errs = append(errs, "duration_too_long")
 	}
-	if !c.StartedAt.IsZero() && c.StartedAt.After(now.Add(maxFutureSkew)) {
+	if maxFuture > 0 && !c.StartedAt.IsZero() && c.StartedAt.After(now.Add(maxFuture)) {
 		errs = append(errs, "started_at_in_future")
 	}
 	if _, ok := ParseConnType(c.ConnType); !ok {

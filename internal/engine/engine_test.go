@@ -233,11 +233,10 @@ func TestDuplicateOfBlockedCallStaysBlocked(t *testing.T) {
 func TestValidationErrors(t *testing.T) {
 	e, _ := newEngine(t, nil)
 	cases := map[string]*callrec.Call{
-		"call_id_required":     call("", "+7 916 123-45-67", "+7 495 765-43-21", t0, 5),
-		"callee_required":      call("v1", "+7 916 123-45-67", "", t0, 5),
-		"duration_negative":    call("v2", "+7 916 123-45-67", "+7 495 765-43-21", t0, -1),
-		"started_at_in_future": call("v3", "+7 916 123-45-67", "+7 495 765-43-21", t0.Add(5*time.Hour), 5),
-		"callee_invalid":       call("v4", "+7 916 123-45-67", "не номер", t0, 5),
+		"call_id_required":  call("", "+7 916 123-45-67", "+7 495 765-43-21", t0, 5),
+		"callee_required":   call("v1", "+7 916 123-45-67", "", t0, 5),
+		"duration_negative": call("v2", "+7 916 123-45-67", "+7 495 765-43-21", t0, -1),
+		"callee_invalid":    call("v4", "+7 916 123-45-67", "не номер", t0, 5),
 	}
 	for want, c := range cases {
 		_, err := e.Score(c)
@@ -246,8 +245,22 @@ func TestValidationErrors(t *testing.T) {
 			t.Fatalf("%s: err = %v", want, err)
 		}
 	}
-	if e.Metrics.Errors.Load() != 5 {
+	if e.Metrics.Errors.Load() != 4 {
 		t.Fatalf("errors metric = %d", e.Metrics.Errors.Load())
+	}
+}
+
+func TestFutureTimestampPolicy(t *testing.T) {
+	future := call("fut-1", "+7 916 123-45-67", "+7 495 765-43-21", t0.Add(5*time.Hour), 5)
+	e, _ := newEngine(t, nil)
+	if _, err := e.Score(future); err != nil {
+		t.Fatalf("by default future timestamps are accepted (replay of historical data): %v", err)
+	}
+	strict, _ := newEngine(t, func(c *Config) { c.MaxFutureSkew = time.Hour })
+	future2 := call("fut-2", "+7 916 123-45-67", "+7 495 765-43-21", t0.Add(5*time.Hour), 5)
+	var ve *ValidationError
+	if _, err := strict.Score(future2); !errors.As(err, &ve) || ve.Codes[0] != "started_at_in_future" {
+		t.Fatalf("strict mode: %v", err)
 	}
 }
 

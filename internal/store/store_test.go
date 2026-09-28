@@ -2,54 +2,59 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
-	"time"
 )
 
-// Интеграционный тест: требует реальный Postgres. Локально пропускается,
-// в CI поднимается service-контейнер и TEST_DATABASE_URL задаётся в env.
-func TestSaveAndRecent(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; skipping integration test")
+// Интеграционный тест: включается через TEST_DATABASE_URL (в CI поднимается Postgres).
+func TestSaveBatchAndRecent(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	s, err := Open(ctx, dsn)
+	ctx := context.Background()
+	s, err := Open(ctx, url)
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatal(err)
 	}
 	defer s.Close()
-
-	rec := Record{
-		RequestID:     "req-test-1",
-		TransactionID: "txn-test-1",
-		UserID:        "u-test",
-		Amount:        1500.50,
-		Currency:      "RUB",
-		IP:            "10.1.2.3",
-		Decision:      "review",
-		Reasons:       []string{"velocity_user_limit"},
-		LatencyMS:     7,
-	}
-	if err := s.Save(ctx, rec); err != nil {
-		t.Fatalf("save: %v", err)
+	if _, err := s.pool.Exec(ctx, "TRUNCATE call_decisions"); err != nil {
+		t.Fatal(err)
 	}
 
-	entries, err := s.Recent(ctx, 10)
-	if err != nil {
-		t.Fatalf("recent: %v", err)
+	recs := []Record{
+		{CallID: "a", CallerMasked: "+7 495 ***-**-12", CalleeMasked: "+7 916 ***-**-83", Decision: "review", Score: 0.31,
+			Reasons: json.RawMessage(`[{"factor":"spoof"}]`), Signals: []string{"spoof"}, ModelVersion: "m1"},
+		{CallID: "b", CallerMasked: "+7 916 ***-**-01", CalleeMasked: "+7 495 ***-**-02", Decision: "allow", Score: 0.001},
+		{CallID: "a", CallerMasked: "dup", CalleeMasked: "dup", Decision: "block", Score: 1}, // дубль call_id
 	}
-	if len(entries) == 0 {
-		t.Fatal("want at least one entry")
+	if err := s.SaveBatch(ctx, recs); err != nil {
+		t.Fatal(err)
 	}
-	got := entries[0]
-	if got.TransactionID != rec.TransactionID || got.Decision != rec.Decision {
-		t.Fatalf("latest entry mismatch: %+v", got)
+	if err := s.SaveBatch(ctx, nil); err != nil {
+		t.Fatal(err)
 	}
-	if len(got.Reasons) != 1 || got.Reasons[0] != "velocity_user_limit" {
-		t.Fatalf("reasons mismatch: %v", got.Reasons)
+	all, err := s.Recent(ctx, 10, "")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("Recent = %d rows, err=%v (дубль call_id не должен писаться)", len(all), err)
+	}
+	if all[1].CallID != "a" || all[1].Decision != "review" || all[1].Signals[0] != "spoof" {
+		t.Fatalf("first record must survive the duplicate: %+v", all[1])
+	}
+	only, err := s.Recent(ctx, 10, "review")
+	if err != nil || len(only) != 1 || only[0].CallID != "a" {
+		t.Fatalf("filter by decision: %+v err=%v", only, err)
+	}
+	if all[0].Signals == nil || string(all[0].Reasons) != "[]" {
+		t.Fatalf("defaults for empty signals/reasons: %+v", all[0])
+	}
+}
+
+func TestItoa(t *testing.T) {
+	for in, want := range map[int]string{0: "0", -5: "0", 7: "7", 100: "100", 1234567: "1234567"} {
+		if got := itoa(in); got != want {
+			t.Fatalf("itoa(%d) = %q, want %q", in, got, want)
+		}
 	}
 }

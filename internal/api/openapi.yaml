@@ -1,13 +1,128 @@
 openapi: 3.0.3
 info:
-  title: RedFlag Antifraud — Decision API
-  description: |
-    Ядро антифрод-pipeline. Принимает транзакцию, прогоняет через уровни:
-    L1 hard rules (blacklist, лимиты) → L2 stateful (velocity в Redis) → внешний scorer (опционально).
-    Возвращает allow / review / deny с причинами.
-  version: 0.1.0
+  title: RedFlag Antifraud — Call Scoring API
+  description: "Скоринг вызовов по метаданным сигнализации (без содержимого разговора). Ответ - решение allow, review или block и объяснение: факторы с вкладом в лог-шансы. Автоблокировка - отдельное решение с отдельной ценой ошибки. Экстренные службы (112, 101, 102, 103, 104) всегда получают allow, короткие сервисные номера и проверенные номера из allowlist никогда не блокируются."
+  version: 1.0.0
 servers:
   - url: /
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    Call:
+      type: object
+      required: [call_id, callee]
+      properties:
+        call_id:
+          type: string
+          description: "Уникальный идентификатор вызова (идемпотентность - повторная доставка не учитывается дважды)."
+          example: "c-2026-10-14-0001"
+        caller:
+          type: string
+          description: "Номер вызывающего, полный или с маской. Пустой или нечитаемый - признак риска."
+          example: "+7 495 ***-**-12"
+        callee:
+          type: string
+          example: "+7 916 ***-**-83"
+        started_at:
+          type: string
+          format: date-time
+          description: "Время начала вызова. Если не передано - время приёма."
+          example: "2026-10-14T11:42:00+03:00"
+        duration_sec:
+          type: integer
+          minimum: 0
+          example: 6
+        answered:
+          type: boolean
+          description: "Вызов принят. Если не передано - считается duration_sec > 0."
+        conn_type:
+          type: string
+          enum: [mobile, fixed, international, voip]
+        src_country:
+          type: string
+          description: "ISO-код страны источника из сигнализации."
+          example: "DE"
+        src_operator:
+          type: string
+          description: "Оператор источника из сигнализации."
+        subscriber_id:
+          type: string
+          description: "Идентификатор абонента у оператора (для признака числа номеров на абонента)."
+    Reason:
+      type: object
+      properties:
+        factor:
+          type: string
+          example: "out_calls_1h"
+        value:
+          type: number
+          description: "Значение признака в исходных единицах."
+          example: 340
+        contribution:
+          type: number
+          description: "Вклад в лог-шансы относительно эталонного абонента; больше нуля повышает риск."
+          example: 3.2
+        effect:
+          type: string
+          enum: [raises, lowers]
+        text:
+          type: string
+          example: "340 исходящих вызовов за час"
+    Party:
+      type: object
+      properties:
+        masked:
+          type: string
+          example: "+7 495 ***-**-12"
+        country:
+          type: string
+        region:
+          type: string
+        operator:
+          type: string
+    Response:
+      type: object
+      properties:
+        call_id:
+          type: string
+        decision:
+          type: string
+          enum: [allow, review, block]
+        score:
+          type: number
+          description: "Вероятность риска 0..1."
+        reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reason"
+        signals:
+          type: array
+          items:
+            type: string
+          description: "Сработавшие независимые сильные сигналы (spoof, unallocated_caller, fan, burst, region_sweep, sim_farm, robot)."
+        caller:
+          $ref: "#/components/schemas/Party"
+        callee:
+          $ref: "#/components/schemas/Party"
+        safe_class:
+          type: string
+          enum: [emergency, allowlisted, service_short]
+          description: "Защитный класс вызова, если есть."
+        block_suppressed:
+          type: boolean
+          description: "Модель и сигналы требовали block, но защитный класс его запретил - выдан review."
+        duplicate:
+          type: boolean
+        model_version:
+          type: string
+        numplan_version:
+          type: string
+        latency_us:
+          type: integer
 paths:
   /health:
     get:
@@ -15,126 +130,76 @@ paths:
       responses:
         "200":
           description: Сервис жив
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-  /v1/decisions:
+  /metrics:
+    get:
+      summary: Метрики в формате Prometheus
+      responses:
+        "200":
+          description: Текстовый формат Prometheus
+  /v1/calls/score:
     post:
-      summary: Решение по транзакции
-      description: |
-        Прогоняет транзакцию через pipeline и пишет результат в журнал.
-        Заголовок `X-Request-Id` можно задать свой — иначе сгенерируется (возвращается в ответе).
-      parameters:
-        - name: X-API-Key
-          in: header
-          required: false
-          description: API-ключ (обязателен, если на сервере задан API_KEY)
-          schema: { type: string }
+      summary: Скоринг одного вызова
+      security:
+        - ApiKey: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Transaction"
-            example:
-              transaction_id: txn-0001
-              user_id: user-42
-              amount: 15000
-              currency: RUB
-              ip: 192.168.10.55
-              geo: { lat: 55.75, lon: 37.61 }
-              ts: "2026-09-26T12:00:00Z"
+              $ref: "#/components/schemas/Call"
       responses:
         "200":
-          description: "Вердикт (даже deny — это 200: решение получено)"
-          headers:
-            X-Request-Id:
-              schema: { type: string }
-              description: Идентификатор запроса для трассировки в логах
+          description: Решение с объяснением
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Verdict"
+                $ref: "#/components/schemas/Response"
         "400":
-          description: Некорректный запрос (validation/invalid_json)
+          description: "Ошибка контракта (error - код: call_id_required, callee_required, callee_invalid, duration_negative, conn_type_invalid и т.д.; started_at_in_future - только если включён MAX_FUTURE_SKEW_SEC)"
         "401":
           description: Неверный или отсутствующий X-API-Key
-  /v1/decisions/recent:
+  /v1/calls/score/batch:
+    post:
+      summary: Скоринг пакета вызовов (до 1000), обрабатывается по порядку
+      security:
+        - ApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                calls:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Call"
+      responses:
+        "200":
+          description: "Результаты по каждому вызову; ошибка одного вызова не роняет пакет (поле error)."
+        "400":
+          description: "invalid_json, calls_required, batch_too_large"
+  /v1/calls/recent:
     get:
       summary: Последние решения из журнала
+      description: "В журнал попадают review и block, а также выборка allow. Номера в маскированном виде."
+      security:
+        - ApiKey: []
       parameters:
         - name: limit
           in: query
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
-        - name: X-API-Key
-          in: header
-          required: false
-          description: API-ключ (обязателен, если на сервере задан API_KEY)
-          schema: { type: string }
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+        - name: decision
+          in: query
+          schema:
+            type: string
+            enum: [allow, review, block]
       responses:
         "200":
-          description: Список решений (новые первыми)
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/DecisionRecord"
+          description: Список записей журнала
         "503":
-          description: Журнал отключён (DATABASE_URL не задан)
-        "401":
-          description: Неверный или отсутствующий X-API-Key
-components:
-  schemas:
-    Geo:
-      type: object
-      properties:
-        lat: { type: number, format: double, example: 55.75 }
-        lon: { type: number, format: double, example: 37.61 }
-    Transaction:
-      type: object
-      required: [transaction_id, user_id, amount, ip]
-      properties:
-        transaction_id: { type: string, example: txn-0001 }
-        user_id: { type: string, example: user-42 }
-        amount: { type: number, example: 15000 }
-        currency: { type: string, example: RUB }
-        ip: { type: string, example: 192.168.10.55 }
-        device_id: { type: string, description: "Опционально: устройство (резерв Ф2, граф связей)" }
-        card_id: { type: string, description: "Опционально: идентификатор/хеш карты (резерв Ф2)" }
-        merchant_id: { type: string, description: "Опционально: продавец (резерв Ф2)" }
-        geo: { $ref: "#/components/schemas/Geo" }
-        ts: { type: string, format: date-time }
-    Verdict:
-      type: object
-      properties:
-        request_id: { type: string }
-        transaction_id: { type: string }
-        user_id: { type: string }
-        decision: { type: string, enum: [allow, review, deny] }
-        reasons:
-          type: array
-          items: { type: string }
-          example: [user_blacklisted]
-        latency_ms: { type: integer, example: 1 }
-    DecisionRecord:
-      type: object
-      properties:
-        transaction_id: { type: string }
-        user_id: { type: string }
-        amount: { type: number }
-        currency: { type: string }
-        ip: { type: string }
-        decision: { type: string, enum: [allow, review, deny] }
-        reasons:
-          type: array
-          items: { type: string }
-        created_at: { type: string, format: date-time }
+          description: Журнал отключён

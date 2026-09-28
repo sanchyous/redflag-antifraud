@@ -36,10 +36,20 @@ func TestValidate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := ok
 			tc.mutate(&c)
-			if got := c.Validate(now); !reflect.DeepEqual(got, tc.want) {
+			if got := c.Validate(now, time.Hour); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("Validate = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFutureCheckDisabledByDefault(t *testing.T) {
+	c := Call{CallID: "c", Callee: "1", StartedAt: now.Add(1000 * time.Hour)}
+	if errs := c.Validate(now, 0); len(errs) != 0 {
+		t.Fatalf("maxFuture=0 must disable the check: %v", errs)
+	}
+	if errs := c.Validate(now, time.Hour); len(errs) != 1 || errs[0] != "started_at_in_future" {
+		t.Fatalf("enabled check: %v", errs)
 	}
 }
 

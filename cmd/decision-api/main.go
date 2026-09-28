@@ -1,4 +1,4 @@
-// decision-api — ядро антифрод-pipeline (L1 rules → L2 velocity → внешний scorer).
+// decision-api — ядро антифрод-скоринга вызовов по метаданным сигнализации.
 package main
 
 import (
@@ -13,68 +13,93 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
 	"github.com/sanchyous/redflag-antifraud/internal/api"
-	"github.com/sanchyous/redflag-antifraud/internal/decider"
-	"github.com/sanchyous/redflag-antifraud/internal/rules"
+	"github.com/sanchyous/redflag-antifraud/internal/decide"
+	"github.com/sanchyous/redflag-antifraud/internal/engine"
+	"github.com/sanchyous/redflag-antifraud/internal/journal"
+	"github.com/sanchyous/redflag-antifraud/internal/numplan"
+	"github.com/sanchyous/redflag-antifraud/internal/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/scoring"
 	"github.com/sanchyous/redflag-antifraud/internal/store"
-	"github.com/sanchyous/redflag-antifraud/internal/velocity"
+	"github.com/sanchyous/redflag-antifraud/internal/window"
 )
 
-const version = "0.1.0"
+const version = "1.0.0"
 
 func main() {
 	cfg := loadConfig()
 	logger := setupLogger(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
-
 	logger.Info("starting", "service", "decision-api", "version", version, "addr", cfg.Addr)
 
 	ctx := context.Background()
 
-	// Redis — L2. Недоступный Redis на старте не фатален: будет degraded на каждом запросе.
-	rdb := redis.NewClient(&redis.Options{
-		Addr: cfg.RedisAddr,
-		// Быстрый отказ: недоступный Redis не должен держать запрос секунды
-		// (дефолт go-redis MaxRetries=3 с dial-timeout — до ~3с на транзакцию).
-		MaxRetries:   0,
-		DialTimeout:  250 * time.Millisecond,
-		ReadTimeout:  500 * time.Millisecond,
-		WriteTimeout: 500 * time.Millisecond,
+	// Справочник нумерации: явная ошибка конфигурации — fail-fast; не задан — работаем без регионов.
+	var plan *numplan.Plan
+	if cfg.NumplanDir != "" {
+		t0 := time.Now()
+		var err error
+		plan, err = numplan.LoadDir(cfg.NumplanDir)
+		if err != nil {
+			logger.Error("numplan_load_failed", "dir", cfg.NumplanDir, "err", err.Error())
+			os.Exit(1)
+		}
+		logger.Info("numplan_loaded", "ranges", plan.Size(), "version", plan.Version,
+			"overlaps", plan.Stats.Overlaps, "skipped", plan.Stats.Skipped, "took_ms", time.Since(t0).Milliseconds())
+	} else {
+		logger.Warn("numplan_disabled", "reason", "NUMPLAN_DIR not set: region/operator features are off")
+	}
+
+	classifier, err := loadAllowlist(cfg.AllowlistFile, logger)
+	if err != nil {
+		logger.Error("allowlist_load_failed", "err", err.Error())
+		os.Exit(1)
+	}
+
+	model, err := loadModel(cfg.ModelFile)
+	if err != nil {
+		logger.Error("model_load_failed", "file", cfg.ModelFile, "err", err.Error())
+		os.Exit(1)
+	}
+	logger.Info("model_ready", "version", model.Version, "review", model.Review, "block", model.Block)
+
+	eng, err := engine.New(engine.Config{
+		Plan:       plan,
+		Classifier: classifier,
+		Model:      model,
+		Policy: decide.Policy{
+			Review: float32(cfg.ReviewThreshold), Block: float32(cfg.BlockThreshold), MinStrong: cfg.MinStrong,
+		},
+		MaxFutureSkew: time.Duration(cfg.MaxFutureSkewSec) * time.Second,
+		Window:        window.Config{MaxEvents: cfg.WindowMaxEvents, MaxNumbers: cfg.WindowMaxNumbers, ShortSec: cfg.ShortCallSec},
 	})
+	if err != nil {
+		logger.Error("engine_init_failed", "err", err.Error())
+		os.Exit(1)
+	}
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	go eng.Run(runCtx, time.Duration(cfg.FanEverySec)*time.Second, 5*time.Minute)
 
 	// Postgres — журнал решений. Пустой DATABASE_URL = журнал отключён.
 	var st *store.Store
+	var jr *journal.Journal
 	if cfg.DatabaseURL != "" {
-		var err error
 		st, err = store.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
 			logger.Error("store_open_failed", "err", err.Error())
 			os.Exit(1)
 		}
 		defer st.Close()
+		jr = journal.New(st, journal.Config{AllowSample: cfg.JournalAllowSample}, logger)
+		defer jr.Close()
 		logger.Info("store_connected")
 	} else {
 		logger.Warn("store_disabled", "reason", "DATABASE_URL not set")
 	}
 
-	scorer := &decider.Scorer{
-		Rules: rules.Config{
-			MaxAmount:         cfg.RulesMaxAmount,
-			AllowedCurrencies: splitCSV(cfg.RulesAllowedCurrencies),
-			BlockedUsers:      splitCSV(cfg.RulesBlockedUsers),
-			BlockedIPs:        splitCSV(cfg.RulesBlockedIPs),
-		},
-		Vel:       velocity.New(rdb, cfg.VelocityMaxPerUser, cfg.VelocityMaxPerIP, cfg.VelocityWindow),
-		ScorerURL: cfg.ScorerURL,
-		HTTP:      &http.Client{Timeout: decider.HTTPTimeout},
-		FailOpen:  cfg.FailOpen,
-		Log:       logger,
-	}
-
-	srv := &api.Server{Decider: scorer, Store: st, APIKey: cfg.APIKey, Log: logger}
-
+	srv := &api.Server{Engine: eng, Journal: jr, Store: st, APIKey: cfg.APIKey, FailOpen: cfg.FailOpen, Log: logger}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Routes(),
@@ -82,8 +107,8 @@ func main() {
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
-
 	go func() {
 		logger.Info("listening")
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -92,54 +117,108 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown: SIGTERM из docker stop / systemctl даёт время доработать запросам.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-stop
-	logger.Info("shutting_down", "signal", sig.String())
+	// SIGHUP — горячая перезагрузка модели из MODEL_FILE; SIGTERM/SIGINT — корректная остановка.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	for sig := range sigs {
+		if sig == syscall.SIGHUP {
+			if cfg.ModelFile == "" {
+				logger.Warn("reload_skipped", "reason", "MODEL_FILE not set")
+				continue
+			}
+			m, err := loadModel(cfg.ModelFile)
+			if err != nil {
+				logger.Error("model_reload_failed", "err", err.Error())
+				continue
+			}
+			eng.SetModel(m)
+			logger.Info("model_reloaded", "version", m.Version)
+			continue
+		}
+		logger.Info("shutting_down", "signal", sig.String())
+		break
+	}
 
+	cancelRun()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown_error", "err", err.Error())
 	}
-	if err := rdb.Close(); err != nil {
-		logger.Warn("redis_close_error", "err", err.Error())
-	}
 	logger.Info("stopped")
 }
 
+func loadModel(path string) (*scoring.Model, error) {
+	if path == "" {
+		return scoring.Prior(), nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return scoring.Load(f)
+}
+
+func loadAllowlist(path string, log *slog.Logger) (*protect.Classifier, error) {
+	c := protect.New()
+	if path == "" {
+		return c, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	n, bad := c.LoadAllowlist(f)
+	for _, b := range bad {
+		log.Warn("allowlist_bad_entry", "entry", b)
+	}
+	log.Info("allowlist_loaded", "entries", n, "bad", len(bad))
+	return c, nil
+}
+
 type config struct {
-	Addr                   string
-	RedisAddr              string
-	DatabaseURL            string
-	ScorerURL              string
-	RulesMaxAmount         float64
-	RulesAllowedCurrencies string
-	RulesBlockedUsers      string
-	RulesBlockedIPs        string
-	VelocityMaxPerUser     int
-	VelocityMaxPerIP       int
-	VelocityWindow         time.Duration
-	APIKey                 string
-	FailOpen               bool
-	LogLevel               string
-	LogFormat              string
+	Addr               string
+	DatabaseURL        string
+	APIKey             string
+	FailOpen           bool
+	NumplanDir         string
+	AllowlistFile      string
+	ModelFile          string
+	ReviewThreshold    float64
+	BlockThreshold     float64
+	MinStrong          int
+	WindowMaxEvents    int
+	WindowMaxNumbers   int
+	ShortCallSec       int
+	MaxFutureSkewSec   int
+	FanEverySec        int
+	JournalAllowSample float64
+	LogLevel           string
+	LogFormat          string
 }
 
 func loadConfig() config {
 	return config{
 		Addr:        env("ADDR", ":8000"),
-		RedisAddr:   env("REDIS_ADDR", "127.0.0.1:6379"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
-		ScorerURL:   os.Getenv("SCORER_URL"),
 		APIKey:      os.Getenv("API_KEY"),
-		// FAIL_MODE=closed: деградация инфраструктуры эскалирует вердикт до review.
-		// Любое другое значение (включая отсутствие) — open.
-		FailOpen:           !strings.EqualFold(os.Getenv("FAIL_MODE"), "closed"),
-		VelocityMaxPerUser: envInt("VELOCITY_MAX_PER_USER", 10),
-		VelocityMaxPerIP:   envInt("VELOCITY_MAX_PER_IP", 30),
-		VelocityWindow:     time.Duration(envInt("VELOCITY_WINDOW_SEC", 60)) * time.Second,
+		// FAIL_MODE=closed: сбой скоринга эскалирует вердикт до review; иначе — open (allow).
+		FailOpen:      !strings.EqualFold(os.Getenv("FAIL_MODE"), "closed"),
+		NumplanDir:    os.Getenv("NUMPLAN_DIR"),
+		AllowlistFile: os.Getenv("ALLOWLIST_FILE"),
+		ModelFile:     os.Getenv("MODEL_FILE"),
+		// 0 — взять порог из файла модели.
+		ReviewThreshold:    envFloat("REVIEW_THRESHOLD", 0),
+		BlockThreshold:     envFloat("BLOCK_THRESHOLD", 0),
+		MinStrong:          envInt("BLOCK_MIN_SIGNALS", 2),
+		WindowMaxEvents:    envInt("WINDOW_MAX_EVENTS", 512),
+		WindowMaxNumbers:   envInt("WINDOW_MAX_NUMBERS", 4_000_000),
+		ShortCallSec:       envInt("SHORT_CALL_SEC", 10),
+		MaxFutureSkewSec:   envInt("MAX_FUTURE_SKEW_SEC", 0),
+		FanEverySec:        envInt("FAN_REFRESH_SEC", 30),
+		JournalAllowSample: envFloat("JOURNAL_ALLOW_SAMPLE", 0.01),
 		LogLevel:           env("LOG_LEVEL", "info"),
 		LogFormat:          env("LOG_FORMAT", "text"),
 	}
@@ -168,20 +247,6 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
-}
-
-func splitCSV(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 func setupLogger(level, format string) *slog.Logger {

@@ -1,36 +1,41 @@
-// Package store — журнал решений в Postgres (некритический путь: ошибка записи не влияет на вердикт).
+// Package store — журнал решений по вызовам в Postgres (некритический путь: ошибка записи
+// не влияет на вердикт). В журнал попадают только маскированные номера.
 package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const schema = `
-CREATE TABLE IF NOT EXISTS decisions (
-	id             BIGSERIAL PRIMARY KEY,
-	request_id     TEXT NOT NULL,
-	transaction_id TEXT NOT NULL,
-	user_id        TEXT NOT NULL,
-	amount         NUMERIC(18,2) NOT NULL,
-	currency       TEXT NOT NULL,
-	ip             TEXT NOT NULL,
-	decision       TEXT NOT NULL,
-	reasons        TEXT[] NOT NULL DEFAULT '{}',
-	latency_ms     BIGINT NOT NULL DEFAULT 0,
-	created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS call_decisions (
+	id              BIGSERIAL PRIMARY KEY,
+	call_id         TEXT NOT NULL,
+	caller_masked   TEXT NOT NULL,
+	callee_masked   TEXT NOT NULL,
+	decision        TEXT NOT NULL,
+	score           DOUBLE PRECISION NOT NULL,
+	reasons         JSONB NOT NULL DEFAULT '[]',
+	signals         TEXT[] NOT NULL DEFAULT '{}',
+	safe_class      TEXT NOT NULL DEFAULT '',
+	model_version   TEXT NOT NULL DEFAULT '',
+	numplan_version TEXT NOT NULL DEFAULT '',
+	latency_us      BIGINT NOT NULL DEFAULT 0,
+	created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Идемпотентность: повторный transaction_id не пишет дубль.
--- DO-блок — безопасная миграция для уже созданных баз.
+-- Идемпотентность журнала: повторная доставка вызова не пишет дубль.
 DO $$ BEGIN
-	ALTER TABLE decisions ADD CONSTRAINT decisions_txn_unique UNIQUE (transaction_id);
+	ALTER TABLE call_decisions ADD CONSTRAINT call_decisions_call_id_unique UNIQUE (call_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-CREATE INDEX IF NOT EXISTS idx_decisions_created_at ON decisions (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_decisions_user_id ON decisions (user_id);
+CREATE INDEX IF NOT EXISTS idx_call_decisions_created_at ON call_decisions (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_decisions_decision ON call_decisions (decision, id DESC);
 `
 
+// Store — соединение с Postgres.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -48,61 +53,114 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	return &Store{pool: pool}, nil
 }
 
+// Close закрывает пул.
 func (s *Store) Close() { s.pool.Close() }
 
-// Record — решение, которое пишем в журнал.
+// Record — решение для журнала.
 type Record struct {
-	RequestID     string
-	TransactionID string
-	UserID        string
-	Amount        float64
-	Currency      string
-	IP            string
-	Decision      string
-	Reasons       []string
-	LatencyMS     int64
+	CallID         string
+	CallerMasked   string
+	CalleeMasked   string
+	Decision       string
+	Score          float64
+	Reasons        json.RawMessage // JSON-массив причин
+	Signals        []string
+	SafeClass      string
+	ModelVersion   string
+	NumplanVersion string
+	LatencyUS      int64
+	CreatedAt      time.Time
 }
 
 // Entry — строка журнала для выдачи наружу.
 type Entry struct {
-	TransactionID string    `json:"transaction_id"`
-	UserID        string    `json:"user_id"`
-	Amount        float64   `json:"amount"`
-	Currency      string    `json:"currency"`
-	IP            string    `json:"ip"`
-	Decision      string    `json:"decision"`
-	Reasons       []string  `json:"reasons"`
-	CreatedAt     time.Time `json:"created_at"`
+	CallID         string          `json:"call_id"`
+	Caller         string          `json:"caller"`
+	Callee         string          `json:"callee"`
+	Decision       string          `json:"decision"`
+	Score          float64         `json:"score"`
+	Reasons        json.RawMessage `json:"reasons"`
+	Signals        []string        `json:"signals"`
+	SafeClass      string          `json:"safe_class,omitempty"`
+	ModelVersion   string          `json:"model_version"`
+	NumplanVersion string          `json:"numplan_version,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
-// Save пишет решение.
-func (s *Store) Save(ctx context.Context, r Record) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO decisions (request_id, transaction_id, user_id, amount, currency, ip, decision, reasons, latency_ms)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (transaction_id) DO NOTHING`,
-		r.RequestID, r.TransactionID, r.UserID, r.Amount, r.Currency, r.IP, r.Decision, r.Reasons, r.LatencyMS)
-	return err
+// SaveBatch пишет пачку решений одним round-trip. Дубли по call_id молча пропускаются.
+func (s *Store) SaveBatch(ctx context.Context, recs []Record) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, r := range recs {
+		reasons := r.Reasons
+		if len(reasons) == 0 {
+			reasons = json.RawMessage("[]")
+		}
+		signals := r.Signals
+		if signals == nil {
+			signals = []string{}
+		}
+		created := r.CreatedAt
+		if created.IsZero() {
+			created = time.Now()
+		}
+		batch.Queue(`INSERT INTO call_decisions
+			(call_id, caller_masked, callee_masked, decision, score, reasons, signals, safe_class, model_version, numplan_version, latency_us, created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (call_id) DO NOTHING`,
+			r.CallID, r.CallerMasked, r.CalleeMasked, r.Decision, r.Score, []byte(reasons), signals,
+			r.SafeClass, r.ModelVersion, r.NumplanVersion, r.LatencyUS, created)
+	}
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range recs {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// Recent — последние решения (для демо и отладки).
-func (s *Store) Recent(ctx context.Context, limit int) ([]Entry, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT transaction_id, user_id, amount, currency, ip, decision, reasons, created_at
-		 FROM decisions ORDER BY id DESC LIMIT $1`, limit)
+// Recent — последние решения; decision != "" фильтрует по вердикту.
+func (s *Store) Recent(ctx context.Context, limit int, decision string) ([]Entry, error) {
+	q := `SELECT call_id, caller_masked, callee_masked, decision, score, reasons, signals, safe_class, model_version, numplan_version, created_at
+	      FROM call_decisions`
+	args := []any{}
+	if decision != "" {
+		q += ` WHERE decision = $1`
+		args = append(args, decision)
+	}
+	q += ` ORDER BY id DESC LIMIT ` + itoa(limit)
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []Entry
 	for rows.Next() {
 		var e Entry
-		var reasons []string
-		if err := rows.Scan(&e.TransactionID, &e.UserID, &e.Amount, &e.Currency, &e.IP, &e.Decision, &reasons, &e.CreatedAt); err != nil {
+		var reasons []byte
+		if err := rows.Scan(&e.CallID, &e.Caller, &e.Callee, &e.Decision, &e.Score, &reasons, &e.Signals,
+			&e.SafeClass, &e.ModelVersion, &e.NumplanVersion, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.Reasons = reasons
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func itoa(n int) string {
+	if n <= 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
 }

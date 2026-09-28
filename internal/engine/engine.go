@@ -68,6 +68,9 @@ type Config struct {
 	FanSpan uint32
 	Loc     *time.Location
 	Now     func() time.Time // источник времени (тесты)
+	// MaxFutureSkew — максимальный допустимый уход started_at вперёд относительно часов сервера;
+	// 0 — не проверять (по умолчанию: исторические данные и несинхронные часы источника).
+	MaxFutureSkew time.Duration
 	// ExplainAlways — формировать причины и для allow.
 	ExplainAlways bool
 }
@@ -173,7 +176,7 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 	if c.StartedAt.IsZero() {
 		c.StartedAt = now
 	}
-	if errs := c.Validate(now); len(errs) > 0 {
+	if errs := c.Validate(now, e.cfg.MaxFutureSkew); len(errs) > 0 {
 		e.Metrics.Errors.Add(1)
 		return resp, &ValidationError{Codes: errs}
 	}

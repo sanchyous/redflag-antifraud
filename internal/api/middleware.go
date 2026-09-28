@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -60,7 +62,13 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		s.Log.Info("http_request",
+		// Горячий путь скоринга при большом потоке не должен писать строку в лог на каждый
+		// успешный запрос: 2xx по /v1/calls/* идут на уровне debug, всё остальное — info.
+		lvl := slog.LevelInfo
+		if rec.status < 400 && strings.HasPrefix(r.URL.Path, "/v1/calls/score") {
+			lvl = slog.LevelDebug
+		}
+		s.Log.Log(r.Context(), lvl, "http_request",
 			"request_id", requestIDFrom(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,

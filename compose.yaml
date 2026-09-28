@@ -6,21 +6,29 @@ services:
       - "8000:8000"
     environment:
       ADDR: ":8000"
-      REDIS_ADDR: "redis:6379"
       DATABASE_URL: "postgres://${POSTGRES_USER:-redflag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-redflag}?sslmode=disable"
-      RULES_MAX_AMOUNT: "${RULES_MAX_AMOUNT:-100000}"
-      RULES_ALLOWED_CURRENCIES: "${RULES_ALLOWED_CURRENCIES:-RUB,USD,EUR}"
-      RULES_BLOCKED_USERS: "${RULES_BLOCKED_USERS:-}"
-      RULES_BLOCKED_IPS: "${RULES_BLOCKED_IPS:-}"
-      VELOCITY_MAX_PER_USER: "${VELOCITY_MAX_PER_USER:-10}"
-      VELOCITY_MAX_PER_IP: "${VELOCITY_MAX_PER_IP:-30}"
+      # Справочник плана нумерации (Россвязь) — данные вне git, монтируются с хоста.
+      NUMPLAN_DIR: "${NUMPLAN_DIR:-}"
+      # Необязательные файлы конфигурации (пути внутри контейнера, каталог /data/config).
+      ALLOWLIST_FILE: "${ALLOWLIST_FILE:-}"
+      MODEL_FILE: "${MODEL_FILE:-}"
+      REVIEW_THRESHOLD: "${REVIEW_THRESHOLD:-0}"
+      BLOCK_THRESHOLD: "${BLOCK_THRESHOLD:-0}"
+      BLOCK_MIN_SIGNALS: "${BLOCK_MIN_SIGNALS:-2}"
+      WINDOW_MAX_EVENTS: "${WINDOW_MAX_EVENTS:-512}"
+      WINDOW_MAX_NUMBERS: "${WINDOW_MAX_NUMBERS:-4000000}"
+      SHORT_CALL_SEC: "${SHORT_CALL_SEC:-10}"
+      MAX_FUTURE_SKEW_SEC: "${MAX_FUTURE_SKEW_SEC:-0}"
+      FAN_REFRESH_SEC: "${FAN_REFRESH_SEC:-30}"
+      JOURNAL_ALLOW_SAMPLE: "${JOURNAL_ALLOW_SAMPLE:-0.01}"
       LOG_FORMAT: "json"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       API_KEY: "${API_KEY:-}"
       FAIL_MODE: "${FAIL_MODE:-open}"
+    volumes:
+      - "${NUMPLAN_HOST_DIR:-./data/numplan}:/data/numplan:ro"
+      - "${CONFIG_HOST_DIR:-./data/config}:/data/config:ro"
     depends_on:
-      redis:
-        condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
@@ -29,16 +37,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
-
-  redis:
-    image: redis:7-alpine
-    container_name: redflag-redis
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
 
   postgres:
     image: postgres:17-alpine
