@@ -216,6 +216,23 @@ func TestBrandByName(t *testing.T) {
 	}
 }
 
+func TestSubscriberHash(t *testing.T) {
+	e := New(nil, nil)
+	c := base()
+	r, _ := e.Enrich(&c)
+	if r.Event.Subscriber != 0 {
+		t.Fatal("no subscriber_id → 0")
+	}
+	c.SubscriberID = "sub-1"
+	a, _ := e.Enrich(&c)
+	b, _ := e.Enrich(&c)
+	c.SubscriberID = "sub-2"
+	d, _ := e.Enrich(&c)
+	if a.Event.Subscriber == 0 || a.Event.Subscriber != b.Event.Subscriber || a.Event.Subscriber == d.Event.Subscriber {
+		t.Fatal("subscriber hash must be stable and distinct")
+	}
+}
+
 func BenchmarkEnrich(b *testing.B) {
 	e := New(testPlan(b), nil)
 	c := base()

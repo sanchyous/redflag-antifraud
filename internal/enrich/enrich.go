@@ -153,6 +153,7 @@ func (e *Enricher) Enrich(c *callrec.Call) (Result, error) {
 		CallerRegion: r.Caller.RegionID,
 		CalleeRegion: r.Callee.RegionID,
 		Flags:        flags,
+		Subscriber:   hashID(c.SubscriberID),
 	}
 	return r, nil
 }
@@ -163,4 +164,20 @@ func callerKey(s Side) uint64 {
 		return 0
 	}
 	return s.Num.Key()
+}
+
+// hashID — FNV-1a; пустая строка → 0 («неизвестно»).
+func hashID(s string) uint64 {
+	if s == "" {
+		return 0
+	}
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	if h == 0 {
+		h = 1
+	}
+	return h
 }

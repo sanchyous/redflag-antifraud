@@ -58,6 +58,8 @@ type Call struct {
 	// SrcCountry — ISO-код страны источника из сигнализации, SrcOperator — оператор источника.
 	SrcCountry  string `json:"src_country,omitempty"`
 	SrcOperator string `json:"src_operator,omitempty"`
+	// SubscriberID — идентификатор абонента у оператора (для «номеров на одного абонента»); необязателен.
+	SubscriberID string `json:"subscriber_id,omitempty"`
 }
 
 const (
@@ -126,6 +128,7 @@ type Event struct {
 	CallerRegion uint16 // numplan RegionID, 0 — неизвестен
 	CalleeRegion uint16
 	Flags        uint16
+	Subscriber   uint64 // хэш subscriber_id, 0 — неизвестен
 }
 
 // Has проверяет наличие флага.
