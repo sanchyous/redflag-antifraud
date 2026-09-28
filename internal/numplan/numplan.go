@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/sanchyous/redflag-antifraud/internal/phone"
 )
@@ -70,6 +71,7 @@ type Plan struct {
 	regs    []regRec
 	Version string // короткий хэш содержимого файлов
 	Stats   Stats
+	smp     sampler
 }
 
 // Builder накапливает строки из одного или нескольких CSV.
@@ -294,6 +296,79 @@ func (p *Plan) RegionName(id uint16) string {
 
 // RegionCount — число различных регионов в справочнике.
 func (p *Plan) RegionCount() int { return len(p.regs) }
+
+// sampler — индекс для случайного выбора номеров (лениво, для генератора данных).
+type sampler struct {
+	once     sync.Once
+	byRegion [][]int    // индексы диапазонов по региону (индекс = regID)
+	cum      [][]uint64 // накопленные размеры диапазонов по региону
+	all      []int
+	allCum   []uint64
+}
+
+func (p *Plan) buildSampler() {
+	sm := &p.smp
+	sm.byRegion = make([][]int, len(p.regs))
+	sm.cum = make([][]uint64, len(p.regs))
+	var total uint64
+	for i := range p.ranges {
+		r := &p.ranges[i]
+		if p.regs[r.reg].nonGeo {
+			continue
+		}
+		size := r.to - r.from + 1
+		sm.byRegion[r.reg] = append(sm.byRegion[r.reg], i)
+		last := uint64(0)
+		if n := len(sm.cum[r.reg]); n > 0 {
+			last = sm.cum[r.reg][n-1]
+		}
+		sm.cum[r.reg] = append(sm.cum[r.reg], last+size)
+		sm.all = append(sm.all, i)
+		total += size
+		sm.allCum = append(sm.allCum, total)
+	}
+}
+
+// RandomNumber возвращает случайный существующий (из распределённых диапазонов) российский номер
+// в формате "+7XXXXXXXXXX". regionID != 0 ограничивает выбор регионом (Info.RegionID). Нужен
+// генератору синтетических данных; безгеографические диапазоны (8-800) не выбираются.
+// Второе значение false — в регионе нет диапазонов.
+func (p *Plan) RandomNumber(rnd interface{ Uint64N(uint64) uint64 }, regionID uint16) (string, bool) {
+	p.smp.once.Do(p.buildSampler)
+	sm := &p.smp
+	var idx []int
+	var cum []uint64
+	if regionID == 0 {
+		idx, cum = sm.all, sm.allCum
+	} else if int(regionID) <= len(sm.byRegion) {
+		idx, cum = sm.byRegion[regionID-1], sm.cum[regionID-1]
+	}
+	if len(idx) == 0 {
+		return "", false
+	}
+	x := rnd.Uint64N(cum[len(cum)-1])
+	k := sort.Search(len(cum), func(i int) bool { return cum[i] > x })
+	r := p.ranges[idx[k]]
+	before := uint64(0)
+	if k > 0 {
+		before = cum[k-1]
+	}
+	v := r.from + (x - before)
+	code, num := v/10_000_000, v%10_000_000
+	return "+7" + strconv.FormatUint(code, 10) + fmt.Sprintf("%07d", num), true
+}
+
+// RegionIDs возвращает идентификаторы всех географических регионов, в которых есть диапазоны.
+func (p *Plan) RegionIDs() []uint16 {
+	p.smp.once.Do(p.buildSampler)
+	var out []uint16
+	for i, rs := range p.smp.byRegion {
+		if len(rs) > 0 {
+			out = append(out, uint16(i+1))
+		}
+	}
+	return out
+}
 
 // Size — число диапазонов.
 func (p *Plan) Size() int { return len(p.ranges) }

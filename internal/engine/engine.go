@@ -150,86 +150,109 @@ func (e *Engine) Fan() *graph.Index { return e.fan.Index() }
 // Windows возвращает хранилище окон (для метрик и тестов).
 func (e *Engine) Windows() *window.Store { return e.win }
 
-// Score обрабатывает один вызов. Вызов может быть изменён (подставляется StartedAt).
-func (e *Engine) Score(c *callrec.Call) (Response, error) {
-	start := time.Now()
+// Analysis — результат стадий до модели: обогащение, защитный класс и вектор признаков.
+// Обучение и оценка используют Analyze напрямую, поэтому признаки при обучении и в проде
+// считаются одним и тем же кодом.
+type Analysis struct {
+	Res       enrich.Result
+	Vec       features.Vector
+	Class     protect.Class
+	Emergency bool // вызов экстренной службы: вектор не считается, окна не пополняются
+	RawOnly   bool // экстренная служба распознана по «сырой» записи, разбор сторон не выполнялся
+	Dup       bool
+}
+
+// Analyze проходит стадии до модели. Побочный эффект — пополнение окон и счётчиков (кроме
+// экстренных вызовов и дублей).
+func (e *Engine) Analyze(c *callrec.Call) (Analysis, error) {
+	var a Analysis
 	now := e.now()
-	resp := Response{CallID: c.CallID, ModelVersion: e.model.Load().Version}
-	if e.cfg.Plan != nil {
-		resp.NumplanVersion = e.cfg.Plan.Version
-	}
 
 	// Экстренные службы — до любой валидации и парсинга: нестандартная запись ("*112#")
 	// не должна стать ошибкой, а вызов — блокировкой. Окна не пополняем.
 	if protect.IsEmergencyRaw(c.Callee) || protect.IsEmergencyRaw(c.Caller) {
-		e.Metrics.Emergency.Add(1)
-		e.Metrics.Allow.Add(1)
-		resp.Decision = decide.Allow.String()
-		resp.SafeClass = protect.Emergency.String()
-		resp.Reasons = []explain.Reason{}
-		resp.Caller.Masked = maskRaw(c.Caller)
-		resp.Callee.Masked = maskRaw(c.Callee)
-		resp.LatencyUS = time.Since(start).Microseconds()
-		return resp, nil
+		a.Emergency, a.RawOnly, a.Class = true, true, protect.Emergency
+		return a, nil
 	}
-
 	if c.StartedAt.IsZero() {
 		c.StartedAt = now
 	}
 	if errs := c.Validate(now, e.cfg.MaxFutureSkew); len(errs) > 0 {
 		e.Metrics.Errors.Add(1)
-		return resp, &ValidationError{Codes: errs}
+		return a, &ValidationError{Codes: errs}
 	}
 	res, err := e.enrich.Enrich(c)
 	if err != nil {
 		e.Metrics.Errors.Add(1)
-		return resp, &ValidationError{Codes: []string{"callee_invalid"}}
+		return a, &ValidationError{Codes: []string{"callee_invalid"}}
 	}
-	class := e.class.Classify(res.Caller.Num, res.Callee.Num, res.Caller.Valid)
-	if class == protect.Emergency {
-		e.Metrics.Emergency.Add(1)
-		e.Metrics.Allow.Add(1)
-		fillParties(&resp, &res)
-		resp.Decision = decide.Allow.String()
-		resp.SafeClass = class.String()
-		resp.Reasons = []explain.Reason{}
-		resp.LatencyUS = time.Since(start).Microseconds()
-		return resp, nil
+	a.Res = res
+	a.Class = e.class.Classify(res.Caller.Num, res.Callee.Num, res.Caller.Valid)
+	if a.Class == protect.Emergency {
+		a.Emergency = true
+		return a, nil
 	}
 
 	// Повторная доставка: считаем по накопленному состоянию, но не учитываем вызов второй раз.
-	dup := e.dedupe.Seen(c.CallID, res.Event.TS)
+	a.Dup = e.dedupe.Seen(c.CallID, res.Event.TS)
 	var wf window.Features
-	if dup {
+	if a.Dup {
 		e.Metrics.Duplicates.Add(1)
 		wf.Out = e.win.Peek(res.Event.Caller, true, res.Event.TS)
 		wf.In = e.win.Peek(res.Event.Callee, false, res.Event.TS)
 	} else {
 		wf = e.win.Observe(&res.Event)
 	}
-
-	in := features.Input{Res: &res, Win: wf, ShortSec: e.cfg.Window.ShortSec}
+	in := features.Input{Res: &a.Res, Win: wf, ShortSec: e.cfg.Window.ShortSec}
 	if fi, ok := e.fan.Lookup(res.Event.Caller); ok {
 		in.Fan, in.InFan = fi, true
 	}
 	if res.Event.Subscriber != 0 && res.Caller.Valid {
 		in.SubNums = e.subs.Observe(res.Event.Subscriber, res.Event.Caller)
 	}
-	var vec features.Vector
-	features.Build(&in, &vec)
+	features.Build(&in, &a.Vec)
+	return a, nil
+}
+
+// Score обрабатывает один вызов. Вызов может быть изменён (подставляется StartedAt).
+func (e *Engine) Score(c *callrec.Call) (Response, error) {
+	start := time.Now()
+	resp := Response{CallID: c.CallID, ModelVersion: e.model.Load().Version}
+	if e.cfg.Plan != nil {
+		resp.NumplanVersion = e.cfg.Plan.Version
+	}
+	a, err := e.Analyze(c)
+	if err != nil {
+		return resp, err
+	}
+	if a.Emergency {
+		e.Metrics.Emergency.Add(1)
+		e.Metrics.Allow.Add(1)
+		resp.Decision = decide.Allow.String()
+		resp.SafeClass = protect.Emergency.String()
+		resp.Reasons = []explain.Reason{}
+		if a.RawOnly {
+			resp.Caller.Masked = maskRaw(c.Caller)
+			resp.Callee.Masked = maskRaw(c.Callee)
+		} else {
+			fillParties(&resp, &a.Res)
+		}
+		resp.LatencyUS = time.Since(start).Microseconds()
+		return resp, nil
+	}
 
 	model, pol := e.model.Load(), e.policy.Load()
 	var ex scoring.Explanation
-	model.Score(&vec, &ex)
-	sig := pol.StrongSignals(&vec)
-	d := pol.Decide(class, ex.Score, sig)
+	model.Score(&a.Vec, &ex)
+	sig := pol.StrongSignals(&a.Vec)
+	d := pol.Decide(a.Class, ex.Score, sig)
 
-	fillParties(&resp, &res)
+	fillParties(&resp, &a.Res)
 	resp.Decision = d.Verdict.String()
 	resp.Score = float64(int(float64(ex.Score)*10000+0.5)) / 10000
-	resp.Duplicate = dup
+	resp.Duplicate = a.Dup
 	resp.BlockSuppressed = d.BlockSuppressed
-	resp.SafeClass = class.String()
+	resp.SafeClass = a.Class.String()
 	resp.Signals = sig.Names()
 	if d.Verdict != decide.Allow || e.cfg.ExplainAlways {
 		resp.Reasons = explain.Reasons(&ex, 0.05, 6, 2)
@@ -250,6 +273,9 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 	resp.LatencyUS = time.Since(start).Microseconds()
 	return resp, nil
 }
+
+// Policy возвращает текущую политику решений.
+func (e *Engine) Policy() decide.Policy { return *e.policy.Load() }
 
 func fillParties(resp *Response, r *enrich.Result) {
 	resp.Caller = party(&r.Caller)

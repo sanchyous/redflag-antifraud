@@ -1,6 +1,7 @@
 package numplan
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -152,6 +153,50 @@ func TestRegionID(t *testing.T) {
 	}
 	multi, _ := p.LookupPrefix("902")
 	_ = multi
+}
+
+func TestRandomNumber(t *testing.T) {
+	p := mustPlan(t, fixture)
+	rnd := rand.New(rand.NewPCG(1, 2))
+	kal, _ := p.Lookup(num(t, "+7 401 220-05-00"))
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		s, ok := p.RandomNumber(rnd, 0)
+		if !ok {
+			t.Fatal("no number")
+		}
+		n, err := phone.Parse(s)
+		if err != nil {
+			t.Fatalf("generated %q is not a valid number: %v", s, err)
+		}
+		if _, found := p.Lookup(n); !found {
+			t.Fatalf("generated number %s is outside allocated ranges", s)
+		}
+		if info, _ := p.Lookup(n); info.NonGeo {
+			t.Fatalf("non-geographic number sampled: %s", s)
+		}
+		seen[s] = true
+	}
+	if len(seen) < 100 {
+		t.Fatalf("too little variety: %d", len(seen))
+	}
+	// в регионе — только его номера
+	for i := 0; i < 200; i++ {
+		s, ok := p.RandomNumber(rnd, kal.RegionID)
+		if !ok {
+			t.Fatal("region sampling failed")
+		}
+		n, _ := phone.Parse(s)
+		if info, _ := p.Lookup(n); info.RegionID != kal.RegionID {
+			t.Fatalf("%s is not in region %d", s, kal.RegionID)
+		}
+	}
+	if _, ok := p.RandomNumber(rnd, 9999); ok {
+		t.Fatal("unknown region must fail")
+	}
+	if len(p.RegionIDs()) < 3 {
+		t.Fatalf("RegionIDs = %v", p.RegionIDs())
+	}
 }
 
 func TestOverlapsDetected(t *testing.T) {
