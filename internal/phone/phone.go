@@ -48,38 +48,51 @@ func Parse(raw string) (Number, error) {
 	if hasPlus {
 		s = s[1:]
 	}
-	var b strings.Builder
-	for _, r := range s {
+	// Единственная аллокация — итоговая строка Digits: разбор идёт в стековом буфере.
+	var buf, buf2 [maxDigits + 4]byte
+	n, masked := 0, false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
 		switch {
-		case r >= '0' && r <= '9', r == '*':
-			b.WriteRune(r)
-		case r == ' ', r == '-', r == '(', r == ')', r == '.', r == ' ':
+		case ch >= '0' && ch <= '9', ch == '*':
+			if n == len(buf) {
+				return Number{}, ErrTooLong
+			}
+			buf[n] = ch
+			n++
+			if ch == '*' {
+				masked = true
+			}
+		case ch == ' ', ch == '-', ch == '(', ch == ')', ch == '.':
+		case ch == 0xC2 && i+1 < len(s) && s[i+1] == 0xA0: // неразрывный пробел
+			i++
 		default:
 			return Number{}, ErrInvalid
 		}
 	}
-	c := b.String()
-	if c == "" {
+	c := buf[:n]
+	if n == 0 {
 		return Number{}, ErrInvalid
 	}
-	masked := strings.Contains(c, "*")
 
 	if !hasPlus {
-		if len(c) <= maxShortLen {
+		if n <= maxShortLen {
 			if masked {
 				return Number{}, ErrInvalid
 			}
-			return Number{Digits: c, Short: true}, nil
+			return Number{Digits: string(c), Short: true}, nil
 		}
 		switch {
-		case strings.HasPrefix(c, "810"):
+		case n >= 3 && c[0] == '8' && c[1] == '1' && c[2] == '0':
 			c = c[3:]
-		case strings.HasPrefix(c, "00"):
+		case n >= 2 && c[0] == '0' && c[1] == '0':
 			c = c[2:]
-		case len(c) == 11 && c[0] == '8':
-			c = "7" + c[1:]
-		case len(c) == 10 && strings.IndexByte("3489", c[0]) >= 0:
-			c = "7" + c
+		case n == 11 && c[0] == '8':
+			c[0] = '7'
+		case n == 10 && (c[0] == '3' || c[0] == '4' || c[0] == '8' || c[0] == '9'):
+			buf2[0] = '7'
+			copy(buf2[1:], c)
+			c = buf2[:11]
 		}
 	}
 	if len(c) > maxDigits {
@@ -88,17 +101,12 @@ func Parse(raw string) (Number, error) {
 	if len(c) < minDigits {
 		return Number{}, ErrInvalid
 	}
-	cc, iso, ok := lookupCountry(c)
+	d := string(c)
+	cc, iso, ok := lookupCountry(d)
 	if !ok {
 		return Number{}, ErrInvalid
 	}
-	return Number{
-		Digits:   c,
-		CC:       cc,
-		ISO:      iso,
-		National: c[len(cc):],
-		Masked:   masked,
-	}, nil
+	return Number{Digits: d, CC: cc, ISO: iso, National: d[len(cc):], Masked: masked}, nil
 }
 
 // E164 возвращает "+<digits>". Для короткого номера — как есть.
@@ -134,19 +142,29 @@ func (n Number) Mask() string {
 		return n.Digits
 	}
 	nat := n.National
+	var out [40]byte
+	o := append(out[:0], '+')
+	o = append(o, n.CC...)
+	o = append(o, ' ')
 	if len(nat) < 6 {
-		return "+" + n.CC + " " + strings.Repeat("*", len(nat))
+		for range nat {
+			o = append(o, '*')
+		}
+		return string(o)
 	}
-	head, tail := nat[:3], nat[len(nat)-2:]
-	mid := len(nat) - 5
-	var body string
+	// Если сам вход уже был маской, '*' в голове и хвосте остаются как есть.
+	o = append(o, nat[:3]...)
+	o = append(o, ' ')
 	if n.CC == "7" && len(nat) == 10 {
-		body = "***-**-" + tail
+		o = append(o, "***-**-"...)
 	} else {
-		body = strings.Repeat("*", mid) + "-" + tail
+		for i := 0; i < len(nat)-5; i++ {
+			o = append(o, '*')
+		}
+		o = append(o, '-')
 	}
-	// Если сам вход уже был маской, '*' в head/tail остаются как есть.
-	return "+" + n.CC + " " + head + " " + body
+	o = append(o, nat[len(nat)-2:]...)
+	return string(o)
 }
 
 // ID — стабильный псевдоним номера для связывания записей без хранения самого номера:

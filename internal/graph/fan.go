@@ -26,6 +26,12 @@ type Config struct {
 	MaxMeanDur  float32 // средняя длительность принятых, до которой шаблон аномален, с (по умолчанию 15)
 }
 
+// MinCallsOrDefault возвращает MinCalls с учётом значения по умолчанию.
+func (c Config) MinCallsOrDefault() int {
+	c.defaults()
+	return c.MinCalls
+}
+
 func (c *Config) defaults() {
 	if c.MinCalls <= 0 {
 		c.MinCalls = 30

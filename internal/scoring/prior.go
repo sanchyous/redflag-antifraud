@@ -4,24 +4,26 @@ import "github.com/sanchyous/redflag-antifraud/internal/features"
 
 // Prior — экспертная априорная модель: работает до обучения на данных и служит
 // стартовой точкой. Веса заданы из логики домена (см. THEORY.md), эталонный
-// абонент — обычный человек с парой вызовов в час и разговором около полутора минут.
+// абонент — обычный человек с одним-двумя вызовами, разговором около полутора минут; его
+// базовые значения намеренно совпадают с «холодным стартом» (нет истории у номера), чтобы
+// отсутствие истории не давало отрицательных вкладов и не гасило сильные сигналы вроде подмены.
 // Базовый риск эталона — 0,2% (logit ≈ −6,2).
 func Prior() *Model {
 	m := &Model{Version: "prior-1", Review: 0.15, Block: 0.9}
 	set := func(i int, w, base float32) { m.W[i], m.Base[i] = w, base }
 
 	set(features.OutCalls1h, 0.9, 0.69)
-	set(features.OutCalls24h, 0.3, 1.4)
+	set(features.OutCalls24h, 0.3, 0.69)
 	set(features.OutPeers1h, 0.5, 0.69)
-	set(features.OutPeers24h, 0.3, 1.1)
-	set(features.OutNovelty, 1.5, 0.3)
+	set(features.OutPeers24h, 0.3, 0.69)
+	set(features.OutNovelty, 1.5, 0)
 	set(features.OutRegions24h, 0.8, 0.7)
-	set(features.OutRegionEntropy, 0.35, 0.3)
+	set(features.OutRegionEntropy, 0.35, 0)
 	set(features.OutShortShare, 2.0, 0.05)
 	set(features.OutUnansweredShare, 1.8, 0.1)
 	set(features.OutGapRobot, 1.5, 0)
-	set(features.InCalls1h, 0.2, 0.3)
-	set(features.InPeers24h, 0.15, 0.7)
+	set(features.InCalls1h, 0.2, 0.69)
+	set(features.InPeers24h, 0.15, 0.69)
 	set(features.CallShort, 0.6, 0.05)
 	set(features.CallHangup1s, 1.0, 0.01)
 	set(features.CallUnanswered, 0.3, 0.2)
