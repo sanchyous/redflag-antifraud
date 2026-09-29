@@ -51,7 +51,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := pool.Exec(ctx, schema); err != nil {
+	if _, err := pool.Exec(ctx, schema+telemetrySchema); err != nil {
 		pool.Close()
 		return nil, err
 	}

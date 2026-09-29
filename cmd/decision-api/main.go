@@ -135,6 +135,8 @@ func main() {
 	tel := telemetry.New(nil)
 	stopTel := make(chan struct{})
 	go tel.Run(stopTel)
+	persistDone := make(chan struct{})
+	close(persistDone) // без Postgres сохранять нечего
 
 	// Postgres — журнал решений. Пустой DATABASE_URL = журнал отключён.
 	var st *store.Store
@@ -149,6 +151,24 @@ func main() {
 		jr = journal.New(st, journal.Config{AllowSample: cfg.JournalAllowSample}, logx.Component(logger, "journal"))
 		defer jr.Close()
 		log.Info("store_connected", "journal_allow_sample", cfg.JournalAllowSample)
+
+		// Панель не должна обнуляться при перезапуске: поднимаем сутки минутных агрегатов и последние рискованные
+		// решения, дальше агрегаты сохраняются в фоне.
+		rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if rows, err := st.LoadMinutes(rctx, time.Now().Add(-24*time.Hour).Unix()); err != nil {
+			log.Warn("telemetry_restore_failed", "err", err.Error())
+		} else if evs, err := st.RiskyEvents(rctx, 1000); err != nil {
+			log.Warn("telemetry_restore_failed", "err", err.Error())
+		} else {
+			tel.RestoreEvents(evs)
+			log.Info("telemetry_restored", "minutes", tel.Restore(rows), "events", len(evs))
+		}
+		cancel()
+		persistDone = make(chan struct{})
+		go func() {
+			defer close(persistDone)
+			tel.Persist(runCtx, st, 15*time.Second, func(err error) { log.Warn("telemetry_save_failed", "err", err.Error()) })
+		}()
 	} else {
 		log.Warn("store_disabled", "reason", "DATABASE_URL not set: decisions are not journaled")
 	}
@@ -198,6 +218,7 @@ func main() {
 	}
 
 	cancelRun()
+	<-persistDone // последнее сохранение телеметрии до закрытия соединения с БД
 	close(stopTel)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

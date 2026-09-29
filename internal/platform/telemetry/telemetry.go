@@ -113,7 +113,8 @@ type Recorder struct {
 	mins    [minSlots]bucket
 
 	rollMu    sync.Mutex
-	foldedSec int64 // последняя секунда, свёрнутая в минутный буфер
+	foldedSec int64              // последняя секунда, свёрнутая в минутный буфер
+	dirty     map[int64]struct{} // минуты, изменённые с последнего сохранения (под rollMu)
 
 	total struct {
 		decisions [nDecisions]atomic.Uint64
@@ -131,7 +132,7 @@ func New(now func() time.Time) *Recorder {
 	if now == nil {
 		now = time.Now
 	}
-	r := &Recorder{now: now, started: now()}
+	r := &Recorder{now: now, started: now(), dirty: map[int64]struct{}{}}
 	r.events.init(1000)
 	r.factors.m = map[string]uint64{}
 	r.foldedSec = r.started.Unix() - 1
@@ -202,6 +203,7 @@ func (r *Recorder) Roll() {
 			mb.reset(minute)
 		}
 		mb.addFrom(sb)
+		r.dirty[minute] = struct{}{}
 	}
 	if cur-1 > r.foldedSec {
 		r.foldedSec = cur - 1
