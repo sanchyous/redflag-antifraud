@@ -7,9 +7,12 @@ import logging
 import os
 import threading
 import time
+from collections import deque
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+import numpy as np
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from .logs import event, setup_logging
@@ -18,6 +21,8 @@ from .model import FeatureError, ModelBundle, ModelError
 log = logging.getLogger("ml-service")
 
 MAX_BATCH = 500
+REPORT_FILE = "report.json"  # отчёт об обучении рядом с моделью (см. training/reportdata.py)
+LAT_WINDOW = 4096  # сколько последних замеров задержки хранить для перцентилей
 SLOW_MS = 50.0  # запрос дольше этого порога пишется на уровне info: он рискует упереться в таймаут ядра
 
 
@@ -58,6 +63,48 @@ class ModelInfo(BaseModel):
     features: list[str]
     thresholds: dict[str, float]
     metrics: dict[str, float] = {}
+
+
+class Stats:
+    """Счётчики самого сервиса для панели: запросы скоринга, ошибки и задержка инференса (последние LAT_WINDOW замеров)."""
+
+    def __init__(self) -> None:
+        self.started = time.time()
+        self._lock = threading.Lock()
+        self.requests = 0
+        self.errors = 0
+        self.rows = 0
+        self._lat: deque[float] = deque(maxlen=LAT_WINDOW)
+
+    def observe(self, took_ms: float, ok: bool, rows: int = 1) -> None:
+        with self._lock:
+            self.requests += 1
+            self.rows += rows
+            if not ok:
+                self.errors += 1
+            self._lat.append(took_ms)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            lat = np.array(self._lat, dtype=np.float64)
+            out = {
+                "uptime_sec": round(time.time() - self.started, 1),
+                "requests": self.requests,
+                "errors": self.errors,
+                "rows": self.rows,
+            }
+        if len(lat):
+            p50, p95, p99 = np.percentile(lat, [50, 95, 99])
+            out["latency_ms"] = {
+                "p50": round(float(p50), 3),
+                "p95": round(float(p95), 3),
+                "p99": round(float(p99), 3),
+                "max": round(float(lat.max()), 3),
+                "samples": len(lat),
+            }
+        else:
+            out["latency_ms"] = None
+        return out
 
 
 class State:
@@ -108,6 +155,7 @@ def create_app(model_dir: str | None = None, api_key: str | None = None) -> Fast
     state = State(model_dir)
     app = FastAPI(title="RedFlag ML service", version="1.0.0")
     app.state.model_state = state
+    stats = Stats()
 
     @app.middleware("http")
     async def access_log(request: Request, call_next):
@@ -127,6 +175,8 @@ def create_app(model_dir: str | None = None, api_key: str | None = None) -> Fast
             level = logging.WARNING
         elif took_ms > SLOW_MS:
             level = logging.INFO
+        if request.url.path.startswith("/v1/score"):
+            stats.observe(took_ms, response.status_code < 400)
         if request.url.path != "/health":
             event(
                 log,
@@ -159,6 +209,23 @@ def create_app(model_dir: str | None = None, api_key: str | None = None) -> Fast
             thresholds={"review": th.review, "block": th.block, "gate": th.gate, "min_signals": th.min_signals},
             metrics={k: float(v) for k, v in b.meta.get("metrics", {}).items() if isinstance(v, (int, float))},
         )
+
+    @app.get("/v1/report", dependencies=[Depends(auth)])
+    def report():
+        """Отчёт об обучении текущей модели (кривые, распределения, разбор по типам): для раздела «ML» панели."""
+        state.get()
+        if not state.model_dir:
+            raise HTTPException(status_code=404, detail="report_not_found")
+        try:
+            data = (Path(state.model_dir) / REPORT_FILE).read_bytes()
+        except OSError:
+            raise HTTPException(status_code=404, detail="report_not_found") from None
+        return Response(content=data, media_type="application/json")
+
+    @app.get("/v1/stats", dependencies=[Depends(auth)])
+    def service_stats():
+        b = state.get()
+        return {"model_version": b.version, **stats.snapshot()}
 
     @app.post("/v1/score", response_model=ScoreResponse, dependencies=[Depends(auth)])
     def score(req: ScoreRequest):

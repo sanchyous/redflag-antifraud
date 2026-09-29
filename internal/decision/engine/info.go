@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strconv"
 
 	"github.com/sanchyous/redflag-antifraud/internal/decision/mlclient"
@@ -155,4 +158,23 @@ func maskKey(k uint64) string {
 		return "***"
 	}
 	return n.Mask()
+}
+
+// ErrMLDisabled — ML-сервис не подключён (ML_URL не задан).
+var ErrMLDisabled = errors.New("engine: ML service is not configured")
+
+// MLReport возвращает отчёт об обучении ML-модели для панели.
+func (e *Engine) MLReport(ctx context.Context) (json.RawMessage, error) {
+	if e.cfg.ML == nil {
+		return nil, ErrMLDisabled
+	}
+	return e.cfg.ML.Report(ctx)
+}
+
+// MLServiceStats возвращает счётчики ML-сервиса (запросы, ошибки, задержка инференса).
+func (e *Engine) MLServiceStats(ctx context.Context) (json.RawMessage, error) {
+	if e.cfg.ML == nil {
+		return nil, ErrMLDisabled
+	}
+	return e.cfg.ML.ServiceStats(ctx)
 }

@@ -107,3 +107,33 @@ def test_reload_keeps_old_model_on_failure(trained, tmp_path):
     assert c.post("/v1/reload").status_code == 500
     assert c.get("/health").json()["model_version"] == v, "неудачная перезагрузка не должна ломать текущую модель"
     assert c.post("/v1/score", json={"features": NORMAL}).status_code == 200
+
+
+def test_report_endpoint_serves_training_report(client):
+    r = client.get("/v1/report")
+    assert r.status_code == 200
+    rep = r.json()
+    assert rep["model"]["version"] == client.get("/v1/model").json()["version"]
+    assert rep["data"]["synthetic"] is True
+    roc = rep["curves"]["roc_ml"]
+    assert len(roc["fpr"]) == len(roc["recall"]) > 10
+    assert all(a <= b for a, b in zip(roc["recall"], roc["recall"][1:], strict=False))  # recall не убывает с ростом FPR
+    hist = rep["curves"]["score_hist"]
+    assert len(hist["legit"]) == len(hist["fraud"]) == len(hist["edges"]) - 1
+    assert rep["uplift"]["auc_ml"] >= rep["uplift"]["auc_stage1"] - 0.05
+    assert rep["importances"]
+
+
+def test_report_missing_is_404(trained, tmp_path):
+    d = tmp_path / "m"
+    shutil.copytree(trained[0], d)
+    (d / "report.json").unlink()
+    assert TestClient(create_app(str(d))).get("/v1/report").status_code == 404
+
+
+def test_service_stats_count_scoring(client):
+    before = client.get("/v1/stats").json()["requests"]
+    client.post("/v1/score", json={"features": NORMAL})
+    st = client.get("/v1/stats").json()
+    assert st["requests"] == before + 1
+    assert st["latency_ms"]["samples"] >= 1

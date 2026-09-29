@@ -22,6 +22,8 @@ from app.model import META_FILE, MODEL_FILE
 from . import data as D
 from . import evaluate as E
 from .report import write_report
+from .reportdata import REPORT_FILE
+from .reportdata import build as build_report
 
 
 def fit_catboost(
@@ -143,8 +145,28 @@ def train(
     model.save_model(str(out_dir / MODEL_FILE))
     (out_dir / META_FILE).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    importances = dict(zip(features, model.get_feature_importance(), strict=True))
+    (out_dir / REPORT_FILE).write_text(
+        json.dumps(
+            build_report(
+                meta=meta,
+                meta_in=meta_in,
+                scores=score(test_full),
+                test_full=test_full,
+                m_test=m_test,
+                m_test_flat=m_test_flat,
+                targets=targets,
+                n_train=len(train_df),
+                n_calib=len(calib),
+                importances=importances,
+                stage1_review=stage1_review,
+            ),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
     if report_path:
-        importances = dict(zip(features, model.get_feature_importance(), strict=True))
         write_report(
             report_path,
             meta=meta,

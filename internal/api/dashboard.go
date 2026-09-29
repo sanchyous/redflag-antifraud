@@ -1,14 +1,17 @@
 package api
 
 import (
+	"errors"
 	"io/fs"
 	"net/http"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/sanchyous/redflag-antifraud/internal/decision/engine"
 	"github.com/sanchyous/redflag-antifraud/internal/decision/explain"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/mlclient"
 	"github.com/sanchyous/redflag-antifraud/internal/platform/telemetry"
 	"github.com/sanchyous/redflag-antifraud/web"
 )
@@ -179,6 +182,62 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleModel(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.Engine.ModelView())
+}
+
+// handleMLReport отдаёт отчёт об обучении ML-модели (кривые, распределения, разбор по типам). Отчёт меняется только
+// при выкатке новой модели, поэтому кэшируется на короткое время: панель опрашивает раздел каждые несколько секунд.
+func (s *Server) handleMLReport(w http.ResponseWriter, r *http.Request) {
+	s.mlReport.mu.Lock()
+	cached, fresh := s.mlReport.data, time.Since(s.mlReport.at) < mlReportTTL
+	s.mlReport.mu.Unlock()
+	if fresh && cached != nil {
+		writeRaw(w, cached)
+		return
+	}
+	data, err := s.Engine.MLReport(r.Context())
+	if err != nil {
+		s.writeMLError(w, err)
+		return
+	}
+	s.mlReport.mu.Lock()
+	s.mlReport.data, s.mlReport.at = data, time.Now()
+	s.mlReport.mu.Unlock()
+	writeRaw(w, data)
+}
+
+func (s *Server) handleMLService(w http.ResponseWriter, r *http.Request) {
+	data, err := s.Engine.MLServiceStats(r.Context())
+	if err != nil {
+		s.writeMLError(w, err)
+		return
+	}
+	writeRaw(w, data)
+}
+
+func (s *Server) writeMLError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, engine.ErrMLDisabled):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ML-сервис не подключён"})
+	case errors.Is(err, mlclient.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "у текущей модели нет отчёта об обучении: переобучите модель (scripts/retrain.sh)"})
+	default:
+		s.Log.Warn("ml_report_failed", "err", err.Error())
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "ML-сервис недоступен"})
+	}
+}
+
+func writeRaw(w http.ResponseWriter, data []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+const mlReportTTL = 30 * time.Second
+
+type mlReportCache struct {
+	mu   sync.Mutex
+	data []byte
+	at   time.Time
 }
 
 func (s *Server) handleFans(w http.ResponseWriter, _ *http.Request) {

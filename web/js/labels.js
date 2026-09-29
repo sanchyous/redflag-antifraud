@@ -46,3 +46,26 @@ export const factorName = (f) => FACTORS[f] || f;
 /** Является ли причина жёстким правилом (а не вкладом признака модели). */
 export const isRule = (factor) => typeof factor === 'string' && factor.startsWith('rule_');
 export const signalName = (s) => SIGNALS[s] || s;
+
+// Типы абонентов синтетического набора (так они называются в отчёте обучения).
+const KINDS = {
+  regular: 'Обычные абоненты',
+  heavy_user: 'Активные пользователи',
+  call_center: 'Колл-центры',
+  bank_notify: 'Банковские уведомления',
+  courier: 'Курьеры и доставка',
+  roamer: 'Роуминг',
+  foreign_caller: 'Звонки из-за рубежа',
+  corp_multi: 'Корпоративные мультисим',
+  emergency: 'Экстренные службы',
+  spoof_burst: 'Подмена номера + всплеск',
+  robocall: 'Робозвонки',
+  one_ring: 'Один звонок (перезвон)',
+  fan: 'Веер номеров',
+  sim_farm: 'SIM-ферма',
+  cold_spam: 'Холодный спам',
+};
+
+export const LEGIT_KINDS = ['regular', 'heavy_user', 'call_center', 'bank_notify', 'courier', 'roamer', 'foreign_caller', 'corp_multi'];
+export const FRAUD_KINDS = ['spoof_burst', 'robocall', 'one_ring', 'fan', 'sim_farm', 'cold_spam'];
+export const kindName = (k) => KINDS[k] || k;

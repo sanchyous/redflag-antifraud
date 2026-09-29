@@ -190,3 +190,24 @@ svg.graph text { font-size: 10px; fill: var(--muted); }
   .form { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; }
 }
+
+/* раздел «ML»: схема каскада, матрицы ошибок, заметки */
+.flow { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.flow-box { flex: 1 1 150px; min-width: 150px; padding: 10px 12px; border: 1px solid var(--line); border-top: 3px solid var(--na); border-radius: var(--radius); background: var(--panel-head); font-size: 12px; }
+.flow-box b { display: block; font-size: 13px; margin-bottom: 4px; }
+.flow-box.ok { border-top-color: var(--ok-dark); }
+.flow-box.info { border-top-color: var(--info); }
+.flow-box.avg { border-top-color: var(--avg); }
+.flow-arrow { align-self: center; color: var(--muted); font-size: 18px; }
+.note { margin-top: 14px; padding: 10px 14px; border: 1px solid var(--line); border-left-width: 4px; border-radius: var(--radius); background: var(--panel); font-size: 13px; line-height: 1.45; }
+.note.warn { border-left-color: var(--warn); }
+.note.ok { border-left-color: var(--ok-dark); }
+.cm-grid { display: grid; grid-template-columns: 90px 1fr 1fr; gap: 6px; align-items: stretch; }
+.cm-h { font-size: 12px; color: var(--muted); display: flex; align-items: center; justify-content: center; text-align: center; }
+.cm-h.side { justify-content: flex-start; }
+.cm { padding: 10px 8px; border-radius: var(--radius); text-align: center; border: 1px solid var(--line); }
+.cm.good { background: rgba(89, 219, 143, .16); }
+.cm.bad { background: rgba(228, 89, 89, .14); }
+.cm-n { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cm-l { font-size: 12px; }
+.grid .span-2 { grid-column: span 2; }

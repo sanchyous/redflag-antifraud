@@ -25,6 +25,7 @@ import (
 var (
 	ErrBreakerOpen = errors.New("mlclient: circuit breaker open")
 	ErrNoModel     = errors.New("mlclient: service has no model loaded")
+	ErrNotFound    = errors.New("mlclient: resource not found (model trained without a report?)")
 )
 
 // Config — параметры клиента.
@@ -217,6 +218,25 @@ func (c *Client) Info(ctx context.Context) (Info, error) {
 	return inf, nil
 }
 
+// Report возвращает отчёт об обучении текущей модели (JSON как есть: структуру знает только панель).
+// Не подчиняется breaker'у — редкий служебный запрос; ErrNotFound, если модель обучена без отчёта.
+func (c *Client) Report(ctx context.Context) (json.RawMessage, error) {
+	return c.raw(ctx, "/v1/report")
+}
+
+// ServiceStats возвращает счётчики самого ML-сервиса (запросы, ошибки, задержка инференса).
+func (c *Client) ServiceStats(ctx context.Context) (json.RawMessage, error) {
+	return c.raw(ctx, "/v1/stats")
+}
+
+func (c *Client) raw(ctx context.Context, path string) (json.RawMessage, error) {
+	var out json.RawMessage
+	if err := c.do(ctx, 2*c.cfg.Timeout+time.Second, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *Client) do(ctx context.Context, timeout time.Duration, method, path string, body, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -246,9 +266,12 @@ func (c *Client) do(ctx context.Context, timeout time.Duration, method, path str
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return ErrNoModel
 	}
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("mlclient: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
+	return json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
 }

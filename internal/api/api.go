@@ -41,8 +41,9 @@ type Server struct {
 	LogDecisions string
 	Tel          *telemetry.Recorder // nil — создаётся при первом вызове Routes
 
-	lat    latencyHist
-	panics atomic.Uint64
+	mlReport mlReportCache
+	lat      latencyHist
+	panics   atomic.Uint64
 }
 
 // Routes собирает маршруты с middleware.
@@ -63,6 +64,8 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /v1/stats", s.protect(http.HandlerFunc(s.handleStats)))
 	mux.Handle("GET /v1/events", s.protect(http.HandlerFunc(s.handleEvents)))
 	mux.Handle("GET /v1/model", s.protect(http.HandlerFunc(s.handleModel)))
+	mux.Handle("GET /v1/ml/report", s.protect(http.HandlerFunc(s.handleMLReport)))
+	mux.Handle("GET /v1/ml/service", s.protect(http.HandlerFunc(s.handleMLService)))
 	mux.Handle("GET /v1/graph/fans", s.protect(http.HandlerFunc(s.handleFans)))
 	return s.withRequestID(s.withLogging(s.withRecover(mux)))
 }

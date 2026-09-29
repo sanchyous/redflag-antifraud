@@ -106,10 +106,11 @@ export function sevBadge(decision) {
 }
 
 /** Горизонтальные столбики «имя — значение». */
-export function hbars(items, { color = 'var(--accent)', max } = {}) {
+export function hbars(items, { color = 'var(--accent)', max, valWidth } = {}) {
   if (!items || !items.length) return h('div', { class: 'empty' }, 'Данных пока нет');
   const top = max ?? Math.max(...items.map((i) => i.value), 1);
-  return h('div', {}, items.map((i) => h('div', { class: 'hbar' },
+  const cols = valWidth ? `grid-template-columns:minmax(130px,40%) 1fr ${valWidth}px` : null;
+  return h('div', {}, items.map((i) => h('div', { class: 'hbar', style: cols },
     h('div', { class: 'name', title: i.title || i.name }, i.label || i.name),
     h('div', { class: 'track' }, h('div', { class: 'fill', style: `width:${Math.max(2, (i.value / top) * 100)}%;background:${i.color || color}` })),
     h('div', { class: 'val' }, i.text ?? fmt.int(i.value)))));

@@ -43,3 +43,5 @@ export const getEvents = (limit = 50, decision = '') => api(`/v1/events?limit=${
 export const getModel = () => api('/v1/model');
 export const getFans = () => api('/v1/graph/fans');
 export const scoreCall = (call) => api('/v1/calls/score', { method: 'POST', body: call });
+export const getMLReport = () => api('/v1/ml/report');
+export const getMLService = () => api('/v1/ml/service');

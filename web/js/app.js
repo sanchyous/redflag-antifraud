@@ -5,6 +5,7 @@ import { h, toast } from './ui.js';
 import * as components from './views/components.js';
 import * as dashboard from './views/dashboard.js';
 import * as graph from './views/graph.js';
+import * as mlView from './views/ml.js';
 import * as model from './views/model.js';
 import * as playground from './views/playground.js';
 import * as problems from './views/problems.js';
@@ -14,6 +15,7 @@ const ROUTES = [
   { path: 'problems', title: 'Проблемы', icon: '⚠', group: 'Мониторинг', view: problems, badge: true, live: true },
   { path: 'components', title: 'Компоненты', icon: '◉', group: 'Мониторинг', view: components, live: true },
   { path: 'graph', title: 'Граф связей', icon: '⌬', group: 'Аналитика', view: graph, live: true },
+  { path: 'ml', title: 'ML-модель', icon: '◈', group: 'Аналитика', view: mlView, live: true },
   { path: 'model', title: 'Модель', icon: '∑', group: 'Аналитика', view: model },
   { path: 'playground', title: 'Проверка вызова', icon: '▶', group: 'Инструменты', view: playground },
 ];
