@@ -43,13 +43,15 @@ function liveRow(status, ml, service) {
   const lat = service && service.latency_ms;
   const state = !ml.enabled ? ['не подключён', ''] : ml.breaker_open ? ['отказ: работает откат на линейную стадию', 'high'] : ml.active ? ['работает', 'ok'] : ['ожидание модели', 'warn'];
   const sent = t.ml_calls || 0;
+  // ml, linear — из телеметрии: переживают перезапуск. Остальные счётчики считает процесс ядра и сервис ML с момента запуска.
+  const since = `с запуска ядра (${fmt.uptime(status.service.uptime_sec)})`;
   return h('div', { class: 'grid cols-6' },
     tile('ML-сервис', state[0], ml.version || '—', state[1]),
-    tile('Вызовов в ML', fmt.int(sent), `решений на стадии 2: ${fmt.int(t.ml)}`, 'info'),
-    tile('Ошибки ML', fmt.int(t.ml_errors || 0), sent ? `${pct((t.ml_errors || 0) / sent, 2)} запросов` : '—', t.ml_errors ? 'warn' : 'ok'),
-    tile('Пропущено (breaker)', fmt.int(t.ml_skipped || 0), 'вызовы ушли на линейную стадию', t.ml_skipped ? 'warn' : ''),
-    tile('Инференс p50 / p95', lat ? `${fmt.num(lat.p50, 1)} / ${fmt.num(lat.p95, 1)}` : '—', lat ? `мс · p99 ${fmt.num(lat.p99, 1)}, max ${fmt.num(lat.max, 1)}` : 'нет замеров', lat && lat.p95 > 30 ? 'warn' : 'ok'),
-    tile('Запросов в сервисе', service ? fmt.int(service.requests) : '—', service ? `ошибок ${fmt.int(service.errors)}, работает ${fmt.uptime(service.uptime_sec)}` : 'нет данных'));
+    tile('Решений через ML', fmt.int(t.ml), `из ${fmt.int(t.ml + t.linear)} всего (${pct(t.ml + t.linear ? t.ml / (t.ml + t.linear) : 0, 1)}), с учётом перезапусков`, 'info'),
+    tile('Ошибки ML', fmt.int(t.ml_errors || 0), sent ? `${pct((t.ml_errors || 0) / sent, 2)} из ${fmt.int(sent)} запросов ${since}` : `запросов к ML ${since}: 0`, t.ml_errors ? 'warn' : 'ok'),
+    tile('Пропущено (breaker)', fmt.int(t.ml_skipped || 0), `вызовы ушли на линейную стадию ${since}`, t.ml_skipped ? 'warn' : ''),
+    tile('Инференс p50 / p95', lat ? `${fmt.num(lat.p50, 1)} / ${fmt.num(lat.p95, 1)}` : '—', lat ? `мс · p99 ${fmt.num(lat.p99, 1)}, max ${fmt.num(lat.max, 1)}` : 'замеров с запуска ML-сервиса ещё нет', lat && lat.p95 > 30 ? 'warn' : 'ok'),
+    tile('Запросов в сервисе', service ? fmt.int(service.requests) : '—', service ? `ошибок ${fmt.int(service.errors)}, ML-сервис работает ${fmt.uptime(service.uptime_sec)}` : 'нет данных'));
 }
 
 // ---- как устроен каскад ----
