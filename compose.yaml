@@ -25,6 +25,11 @@ services:
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       API_KEY: "${API_KEY:-}"
       FAIL_MODE: "${FAIL_MODE:-open}"
+      ML_URL: "${ML_URL:-}"
+      ML_API_KEY: "${ML_API_KEY:-}"
+      ML_TIMEOUT_MS: "${ML_TIMEOUT_MS:-50}"
+      ML_BREAKER_FAILS: "${ML_BREAKER_FAILS:-5}"
+      ML_BREAKER_COOLDOWN_SEC: "${ML_BREAKER_COOLDOWN_SEC:-10}"
     volumes:
       - "${NUMPLAN_HOST_DIR:-./data/numplan}:/data/numplan:ro"
       - "${CONFIG_HOST_DIR:-./data/config}:/data/config:ro"
@@ -37,6 +42,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+
+  # ML-сервис (стадия 2 каскада). Порт наружу не публикуется: доступен ядру по сети compose.
+  # Без модели в /models сервис отвечает 503, ядро откатывается на линейную стадию.
+  ml:
+    build: ./ml-service
+    restart: unless-stopped
+    environment:
+      MODEL_DIR: "/models"
+      API_KEY: "${ML_API_KEY:-}"
+    volumes:
+      - "${ML_MODELS_HOST_DIR:-./data/models}:/models:ro"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   postgres:
     image: postgres:17-alpine

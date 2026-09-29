@@ -30,7 +30,7 @@ var (
 type Config struct {
 	BaseURL         string
 	APIKey          string
-	Timeout         time.Duration // на один запрос (по умолчанию 25 мс)
+	Timeout         time.Duration // на один запрос (по умолчанию 50 мс; SHAP занимает ~8 мс)
 	BreakerFailures int           // подряд идущих сбоев до открытия (по умолчанию 5)
 	BreakerCooldown time.Duration // сколько breaker остаётся открытым (по умолчанию 10 с)
 	HTTP            *http.Client  // nil — собственный клиент с пулом соединений
@@ -90,7 +90,7 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("mlclient: BaseURL is empty")
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = 25 * time.Millisecond
+		cfg.Timeout = 50 * time.Millisecond
 	}
 	if cfg.BreakerFailures <= 0 {
 		cfg.BreakerFailures = 5

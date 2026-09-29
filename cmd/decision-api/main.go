@@ -254,7 +254,7 @@ func loadConfig() config {
 		JournalAllowSample:   envFloat("JOURNAL_ALLOW_SAMPLE", 0.01),
 		MLURL:                os.Getenv("ML_URL"),
 		MLAPIKey:             os.Getenv("ML_API_KEY"),
-		MLTimeoutMS:          envInt("ML_TIMEOUT_MS", 25),
+		MLTimeoutMS:          envInt("ML_TIMEOUT_MS", 50),
 		MLBreakerFails:       envInt("ML_BREAKER_FAILS", 5),
 		MLBreakerCooldownSec: envInt("ML_BREAKER_COOLDOWN_SEC", 10),
 		LogLevel:             env("LOG_LEVEL", "info"),

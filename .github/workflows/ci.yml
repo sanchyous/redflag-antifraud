@@ -41,9 +41,28 @@ jobs:
       - name: Tests
         run: go test -race ./...
 
+  ml-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ml-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ml-service/requirements-dev.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest -q
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
+      - name: Build core image
         run: docker build -t redflag-antifraud:ci .
+      - name: Build ML service image
+        run: docker build -t redflag-ml:ci ml-service
