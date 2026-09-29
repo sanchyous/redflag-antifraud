@@ -19,6 +19,8 @@ func (r *Response) AppendJSON(b []byte) []byte {
 	b = appendString(b, r.Decision)
 	b = append(b, `,"score":`...)
 	b = appendFloat(b, r.Score)
+	b = append(b, `,"summary":`...)
+	b = appendString(b, r.Summary)
 	b = append(b, `,"reasons":[`...)
 	for i := range r.Reasons {
 		if i > 0 {

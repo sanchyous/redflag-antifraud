@@ -45,9 +45,11 @@ type Party struct {
 
 // Response — результат скоринга вызова.
 type Response struct {
-	CallID          string           `json:"call_id"`
-	Decision        string           `json:"decision"`
-	Score           float64          `json:"score"`
+	CallID   string  `json:"call_id"`
+	Decision string  `json:"decision"`
+	Score    float64 `json:"score"`
+	// Summary — резюме решения одной фразой для оператора и отчётов (подробные вклады — в reasons).
+	Summary         string           `json:"summary"`
 	Reasons         []explain.Reason `json:"reasons"`
 	Signals         []string         `json:"signals,omitempty"`
 	Caller          Party            `json:"caller"`
@@ -265,6 +267,7 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 		resp.Stage = "linear"
 		resp.SafeClass = protect.Emergency.String()
 		resp.Reasons = []explain.Reason{}
+		resp.Summary = summaryEmergency
 		if a.RawOnly {
 			resp.Caller.Masked = maskRaw(c.Caller)
 			resp.Callee.Masked = maskRaw(c.Callee)
@@ -337,6 +340,7 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 	if d.BlockSuppressed {
 		e.Metrics.Suppressed.Add(1)
 	}
+	resp.Summary = summarize(&resp)
 	resp.LatencyUS = time.Since(start).Microseconds()
 	return resp, nil
 }

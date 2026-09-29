@@ -28,7 +28,7 @@ func semanticallyEqual(t *testing.T, got, want []byte) {
 
 func full() Response {
 	return Response{
-		CallID: "c-1", Decision: "review", Score: 0.1511,
+		CallID: "c-1", Decision: "review", Score: 0.1511, Summary: `Вызов +7 495 ***-**-12 → +7 916 ***-**-83: Проверка (риск 0,1511). Причины: "подмена".`,
 		Reasons: []explain.Reason{
 			{Factor: "spoof", Value: 1, Contribution: 3, Effect: "raises", Text: "российский номер при иностранном входе"},
 			{Factor: "call_duration", Value: 6, Contribution: -0.544, Effect: "lowers", Text: "длительность 6 с"},

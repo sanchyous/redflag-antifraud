@@ -44,6 +44,9 @@ func (s *Server) logDecision(ctx context.Context, r *engine.Response) {
 	if len(r.Signals) > 0 {
 		attrs = append(attrs, slog.Any("signals", r.Signals))
 	}
+	if r.Summary != "" && r.Decision != "allow" {
+		attrs = append(attrs, slog.String("summary", r.Summary))
+	}
 	if top != "" {
 		attrs = append(attrs, slog.String("top_reason", top))
 	}

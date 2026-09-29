@@ -91,6 +91,7 @@ export function verdictCard(r) {
       h('div', {}, h('div', { class: 'big' }, (DECISION_RU[r.decision] || r.decision).toUpperCase()),
         h('div', { class: 'muted' }, `score ${r.score.toFixed(4)} · ${r.stage === 'ml' ? 'ML-сервис' : 'линейная модель'} · ${fmt.us(r.latency_us)}`)),
       h('div', { class: 'scorebar', title: 'вероятность риска' }, h('i', { style: `width:${Math.min(100, Math.max(2, r.score * 100))}%` }))),
+    r.summary ? h('p', { style: 'margin:0 0 10px;font-size:14px;line-height:1.45' }, r.summary) : null,
     h('div', { style: 'margin-bottom:8px' }, h('span', { class: 'mono' }, `${r.caller.masked || '(скрыт)'} → ${r.callee.masked || '?'}`)),
     h('div', { class: 'muted', style: 'margin-bottom:8px;font-size:13px' },
       `${r.caller.region || '?'}${r.caller.operator ? ' · ' + r.caller.operator : ''} → ${r.callee.region || '?'}${r.callee.operator ? ' · ' + r.callee.operator : ''}`),

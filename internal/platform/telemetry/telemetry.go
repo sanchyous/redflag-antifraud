@@ -412,6 +412,7 @@ type Event struct {
 	CallID       string    `json:"call_id"`
 	Decision     string    `json:"decision"`
 	Score        float64   `json:"score"`
+	Summary      string    `json:"summary"`
 	Stage        string    `json:"stage"`
 	Signals      []string  `json:"signals"`
 	Caller       string    `json:"caller"`

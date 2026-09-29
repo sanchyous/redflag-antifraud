@@ -460,6 +460,9 @@ func TestRuleFloorVisibleInEventsAndLog(t *testing.T) {
 	if !ev.Items[0].RuleFloor || ev.Items[0].Reasons[0].Factor != "rule_spoof" || ev.Items[0].Reasons[0].Text == "" {
 		t.Fatalf("the rule must be flagged and named first: %+v", ev.Items[0])
 	}
+	if !strings.Contains(buf.String(), `"summary":"Вызов +7 495`) {
+		t.Fatalf("the log event must carry the summary: %s", buf.String())
+	}
 	if !strings.Contains(buf.String(), `"rule_floor":true`) {
 		t.Fatalf("the log event must say the floor fired: %s", buf.String())
 	}

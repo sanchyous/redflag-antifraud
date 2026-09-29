@@ -60,7 +60,7 @@ export function openEvent(e) {
     e.rule_floor ? h('dd', {}, 'Модель не сочла вызов рискованным, но подмена номера — прямое свидетельство: вердикт не ниже «проверка».') : null,
     e.block_suppressed ? h('dt', {}, 'Защита') : null,
     e.block_suppressed ? h('dd', {}, 'Блок отменён защитным классом (проверенный или сервисный номер) — оставлена проверка.') : null);
-  openDrawer('Разбор решения', h('div', {}, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Почему такое решение'),
+  openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Почему такое решение'),
     h('div', { class: 'muted', style: 'font-size:12px' }, 'Вклад фактора в логит риска: вправо — повышает, влево — снижает.'), contrib));
 }
 

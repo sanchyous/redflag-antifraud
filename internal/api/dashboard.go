@@ -38,7 +38,7 @@ func (s *Server) observe(resp *engine.Response) {
 		return
 	}
 	ev := telemetry.Event{
-		Time: time.Now(), CallID: resp.CallID, Decision: resp.Decision, Score: resp.Score, Stage: resp.Stage,
+		Time: time.Now(), CallID: resp.CallID, Decision: resp.Decision, Score: resp.Score, Summary: resp.Summary, Stage: resp.Stage,
 		Signals: resp.Signals, Caller: resp.Caller.Masked, Callee: resp.Callee.Masked,
 		CallerRegion: resp.Caller.Region, CalleeRegion: resp.Callee.Region,
 		RuleFloor: resp.RuleFloor, Suppressed: resp.BlockSuppressed, SafeClass: resp.SafeClass, LatencyUS: resp.LatencyUS,
