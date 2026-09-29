@@ -105,9 +105,9 @@ export function verdictCard(r) {
       return h('div', { style: 'margin:9px 0' },
         h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
           h('span', {}, isRule(x.factor) ? h('b', {}, x.text) : [h('b', {}, factorName(x.factor)), h('span', { class: 'muted' }, ' — ' + x.text)]),
-          h('span', { class: 'mono', style: `color:${up ? 'var(--red)' : 'var(--s2)'}` }, x.contribution === 0 ? 'правило' : fmt.signed(x.contribution))),
+          h('span', { class: 'mono', style: `color:${up ? 'var(--c-block)' : 'var(--c-good)'}` }, x.contribution === 0 ? 'правило' : fmt.signed(x.contribution))),
         h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
           h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
-          h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--red)' : 'var(--s2)'};${up ? 'left:50%;' : 'right:50%;'}width:${(Math.abs(x.contribution) / maxAbs) * 50}%` })));
+          h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--c-block)' : 'var(--c-good)'};${up ? 'left:50%;' : 'right:50%;'}width:${(Math.abs(x.contribution) / maxAbs) * 50}%` })));
     }) : h('div', { class: 'muted' }, 'Рискованных факторов нет'));
 }

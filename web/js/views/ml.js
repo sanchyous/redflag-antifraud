@@ -8,7 +8,7 @@ import { icon } from '../icons.js';
 import { FRAUD_KINDS, LEGIT_KINDS, factorName, kindName } from '../labels.js';
 import { fmt, h, hbars, tile, widget } from '../ui.js';
 
-const C = { ml: 'var(--s1)', s1: 'var(--s2)', legit: 'var(--s3)', fraud: 'var(--red)', review: 'var(--s2)', block: 'var(--red)' };
+const C = { ml: 'var(--c-info)', s1: 'var(--c-muted)', legit: 'var(--c-good)', fraud: 'var(--c-block)', review: 'var(--c-review)', block: 'var(--c-block)' };
 const pct = (x, d = 1) => fmt.pct(x, d);
 const fpr = (x) => fmt.pct(x, x < 0.001 ? 4 : 2);
 

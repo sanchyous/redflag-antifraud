@@ -13,7 +13,7 @@ export async function render(root) {
 
   const weights = hbars(feats.filter((f) => Math.abs(f.w) > 1e-9).map((f) => ({
     name: f.name, label: factorName(f.name), title: f.name, value: Math.abs(f.w), max,
-    color: f.w >= 0 ? 'var(--red)' : 'var(--s2)', text: fmt.signed(f.w, 2),
+    color: f.w >= 0 ? 'var(--c-block)' : 'var(--c-good)', text: fmt.signed(f.w, 2),
   })), { max });
 
   const zero = feats.filter((f) => Math.abs(f.w) <= 1e-9);

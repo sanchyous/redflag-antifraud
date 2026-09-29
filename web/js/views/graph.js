@@ -50,19 +50,19 @@ function fanGraph(g) {
     const peers = (m.peers || []).slice(0, 3);
     peers.forEach((p, j) => {
       const py = y + (j - (peers.length - 1) / 2) * 8;
-      els.push(svg('line', { x1: xL + 6, y1: y, x2: xR - 6, y2: py, stroke: 'var(--s2)', 'stroke-opacity': 0.4, 'stroke-width': 1 }));
-      els.push(svg('circle', { cx: xR, cy: py, r: 3.2, fill: 'var(--s2)' }));
+      els.push(svg('line', { x1: xL + 6, y1: y, x2: xR - 6, y2: py, stroke: 'var(--c-info)', 'stroke-opacity': 0.4, 'stroke-width': 1 }));
+      els.push(svg('circle', { cx: xR, cy: py, r: 3.2, fill: 'var(--c-info)' }));
       if (j === 0) els.push(svg('text', { x: xR + 10, y: py + 3 }, p));
     });
-    els.push(svg('circle', { cx: xL, cy: y, r: 6, fill: 'var(--red)' }, svg('title', {}, `${m.number}: ${m.calls} вызовов, ${m.peer_count} разных адресатов`)));
+    els.push(svg('circle', { cx: xL, cy: y, r: 6, fill: 'var(--c-block)' }, svg('title', {}, `${m.number}: ${m.calls} вызовов, ${m.peer_count} разных адресатов`)));
     els.push(svg('text', { x: xL - 12, y: y + 3.5, 'text-anchor': 'end', style: 'font-size:11px;fill:var(--text)' }, m.number));
     els.push(svg('text', { x: xL + 12, y: y - 6 }, `${m.peer_count} адр.`));
   });
   return h('div', {},
     svg('svg', { class: 'graph', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Граф веера' }, ...els),
     h('div', { class: 'graph-legend' },
-      h('span', {}, h('i', { class: 'dot', style: 'background:var(--red);margin-right:6px' }), 'номера веера'),
-      h('span', {}, h('i', { class: 'dot', style: 'background:var(--s2);margin-right:6px' }), 'адресаты (образец)'),
+      h('span', {}, h('i', { class: 'dot', style: 'background:var(--c-block);margin-right:6px' }), 'номера веера'),
+      h('span', {}, h('i', { class: 'dot', style: 'background:var(--c-info);margin-right:6px' }), 'адресаты (образец)'),
       g.members.length > members.length ? h('span', {}, `показаны 16 из ${g.members.length}`) : null),
     );
 }

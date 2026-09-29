@@ -41,10 +41,10 @@ export function openEvent(e) {
     return h('div', { style: 'margin:10px 0' },
       h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
         h('span', {}, isRule(r.factor) ? h('b', {}, r.text) : [h('b', {}, factorName(r.factor)), h('span', { class: 'muted' }, ' — ' + r.text)]),
-        h('span', { class: 'mono', style: `color:${up ? 'var(--red)' : 'var(--s2)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
+        h('span', { class: 'mono', style: `color:${up ? 'var(--c-block)' : 'var(--c-good)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
       h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
         h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
-        h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--red)' : 'var(--s2)'};${up ? 'left:50%;' : `right:50%;`}width:${w}%` })));
+        h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--c-block)' : 'var(--c-good)'};${up ? 'left:50%;' : `right:50%;`}width:${w}%` })));
   }));
   const kv = h('dl', { class: 'kv' },
     h('dt', {}, 'Решение'), h('dd', {}, sevBadge(e.decision)),

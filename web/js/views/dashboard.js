@@ -7,7 +7,7 @@ import { fmt, h, hbars, tile, widget } from '../ui.js';
 import { componentStatuses, statusList } from './components.js';
 import { eventTable } from './problems.js';
 
-const COLORS = { allow: 'var(--s3)', review: 'var(--s2)', block: 'var(--red)' };
+const COLORS = { allow: 'var(--c-good)', review: 'var(--c-review)', block: 'var(--c-block)' };
 
 export async function render(root, ctx) {
   const points = 60;
@@ -35,18 +35,18 @@ export async function render(root, ctx) {
   ]), { sub: `шаг ${stats.step_sec} с`, cls: 'span-2' });
 
   const latency = widget('Задержка скоринга', lines(stats.points, [
-    { key: 'p50_us', color: 'var(--s3)', label: 'p50' }, { key: 'p95_us', color: 'var(--s2)', label: 'p95' }, { key: 'p99_us', color: 'var(--s1)', label: 'p99' },
+    { key: 'p50_us', color: 'var(--c-info)', label: 'p50' }, { key: 'p95_us', color: 'var(--c-review)', label: 'p95' }, { key: 'p99_us', color: 'var(--c-block)', label: 'p99' },
   ], { width: 400, yFmt: (v) => fmt.us(v) }), {});
 
   const factors = widget('Что чаще всего повышает риск',
-    hbars((stats.top_factors || []).slice(0, 7).map((f) => ({ name: f.name, label: factorName(f.name), title: f.name, value: f.count, color: 'var(--s2)' }))),
+    hbars((stats.top_factors || []).slice(0, 7).map((f) => ({ name: f.name, label: factorName(f.name), title: f.name, value: f.count, color: 'var(--c-review)' }))),
     { sub: 'проверка и блок' });
 
   const signals = widget('Сработавшие сильные сигналы',
-    hbars((stats.top_signals || []).slice(0, 7).map((s) => ({ name: s.name, label: signalName(s.name), value: s.count, color: 'var(--red)' }))));
+    hbars((stats.top_signals || []).slice(0, 7).map((s) => ({ name: s.name, label: signalName(s.name), value: s.count, color: 'var(--c-block)' }))));
 
   const cascade = widget('Каскад решений', h('div', { style: 'display:flex;justify-content:space-around;align-items:center;gap:8px' },
-    ring(1 - mlShare, { color: 'var(--s3)', label: 'линейная стадия' }), ring(mlShare, { color: 'var(--s1)', label: 'ML (CatBoost)' }), ring(flaggedShare, { color: 'var(--red)', label: 'помечено' })));
+    ring(1 - mlShare, { color: 'var(--c-info)', label: 'линейная стадия' }), ring(mlShare, { color: 'var(--c-good)', label: 'ML (CatBoost)' }), ring(flaggedShare, { color: 'var(--c-review)', label: 'помечено' })));
 
   const health = widget('Состояние компонентов', statusList(componentStatuses(status)), { sub: `версия ${status.service.version}` });
 
