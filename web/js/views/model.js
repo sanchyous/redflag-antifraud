@@ -13,7 +13,7 @@ export async function render(root) {
 
   const weights = hbars(feats.filter((f) => Math.abs(f.w) > 1e-9).map((f) => ({
     name: f.name, label: factorName(f.name), title: f.name, value: Math.abs(f.w), max,
-    color: f.w >= 0 ? 'var(--high)' : 'var(--ok-dark)', text: fmt.signed(f.w, 2),
+    color: f.w >= 0 ? 'var(--red)' : 'var(--s2)', text: fmt.signed(f.w, 2),
   })), { max });
 
   const zero = feats.filter((f) => Math.abs(f.w) <= 1e-9);
@@ -22,17 +22,15 @@ export async function render(root) {
   root.replaceChildren(
     h('div', { class: 'grid cols-3' },
       widget('Стадия 1 — линейная модель', h('div', {},
-        h('p', { class: 'muted', style: 'margin-top:0' },
-          'Вклад признака в решение = вес × (значение − значение эталонного абонента). Вес больше нуля повышает риск. ' +
-          'Знаки весов ограничены: рост признака не может снижать риск (кроме длительности разговора).'),
+        h('p', { class: 'muted', style: 'margin-top:0' }, 'Вклад = вес × (значение − эталон). Вес больше нуля повышает риск.'),
         weights,
-        zero.length ? h('p', { class: 'muted', style: 'font-size:12px;margin-bottom:0' }, 'Нулевой вес (не влияют на стадию 1): ' + zero.map((f) => factorName(f.name)).join(', ') + '.') : null),
+        zero.length ? h('p', { class: 'muted', style: 'font-size:12px;margin-bottom:0' }, 'Нулевой вес: ' + zero.map((f) => factorName(f.name)).join(', ') + '.') : null),
       { cls: 'span-2', sub: s1.version }),
       widget('Пороги решения', h('dl', { class: 'kv' },
         h('dt', {}, 'Проверка'), h('dd', {}, '≥ ' + fmt.num(s1.thresholds.review, 4)),
         h('dt', {}, 'Блок'), h('dd', {}, '≥ ' + fmt.num(s1.thresholds.block, 4) + ' и не менее ' + m.min_signals + ' сильных сигналов'),
-        h('dt', {}, 'Защита'), h('dd', {}, 'экстренные — всегда «пропуск»; allowlist и сервисные — без блока'),
-        h('dt', {}, 'Пол-правило'), h('dd', {}, 'подмена номера или номер вне диапазонов — не ниже «проверка»'),
+        h('dt', {}, 'Защита'), h('dd', {}, 'экстренные — «пропуск»; allowlist — без блока'),
+        h('dt', {}, 'Пол-правило'), h('dd', {}, 'подмена и номер вне диапазонов — не ниже «проверки»'),
         h('dt', {}, 'Смещение'), h('dd', { class: 'mono' }, fmt.num(s1.bias, 3)))),
     ),
     h('div', { style: 'margin-top:14px' }, widget('Стадия 2 — ML-сервис (CatBoost + SHAP)', ml
@@ -40,9 +38,9 @@ export async function render(root) {
         h('dt', {}, 'Версия'), h('dd', {}, ml.version),
         h('dt', {}, 'Порог «проверка»'), h('dd', {}, fmt.num(ml.thresholds.review, 4)),
         h('dt', {}, 'Порог «блок»'), h('dd', {}, fmt.num(ml.thresholds.block, 4)),
-        h('dt', {}, 'Ворота каскада'), h('dd', {}, 'оценка стадии 1 ≥ ' + fmt.num(ml.thresholds.gate, 5) + ' или сильный сигнал'),
+        h('dt', {}, 'Ворота каскада'), h('dd', {}, 'стадия 1 ≥ ' + fmt.num(ml.thresholds.gate, 5) + ' или сильный сигнал'),
         h('dt', {}, 'Метрики обучения'), h('dd', {}, Object.entries(ml.metrics || {}).map(([k, v]) => `${k}: ${fmt.num(v, 4)}`).join(' · ') || '—'),
         h('dt', {}, 'Признаков'), h('dd', {}, String(ml.features.length)))
-      : h('div', { class: 'empty' }, 'ML-сервис не подключён или недоступен: решения принимает линейная стадия.'))),
+      : h('div', { class: 'empty' }, 'ML-сервис не подключён или недоступен'))),
   );
 }

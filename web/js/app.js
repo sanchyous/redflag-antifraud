@@ -1,6 +1,7 @@
 // Точка входа панели: навигация (hash-роутер), выбор интервала, автообновление, индикатор связи.
 
 import { ApiError, getKey, getStatus, setKey } from './api.js';
+import { icon } from './icons.js';
 import { h, toast } from './ui.js';
 import * as components from './views/components.js';
 import * as dashboard from './views/dashboard.js';
@@ -11,13 +12,13 @@ import * as playground from './views/playground.js';
 import * as problems from './views/problems.js';
 
 const ROUTES = [
-  { path: 'dashboard', title: 'Панель', icon: '▦', group: 'Мониторинг', view: dashboard, live: true },
-  { path: 'problems', title: 'Проблемы', icon: '⚠', group: 'Мониторинг', view: problems, badge: true, live: true },
-  { path: 'components', title: 'Компоненты', icon: '◉', group: 'Мониторинг', view: components, live: true },
-  { path: 'graph', title: 'Граф связей', icon: '⌬', group: 'Аналитика', view: graph, live: true },
-  { path: 'ml', title: 'ML-модель', icon: '◈', group: 'Аналитика', view: mlView, live: true },
-  { path: 'model', title: 'Модель', icon: '∑', group: 'Аналитика', view: model },
-  { path: 'playground', title: 'Проверка вызова', icon: '▶', group: 'Инструменты', view: playground },
+  { path: 'dashboard', title: 'Панель', icon: 'dashboard', group: 'Мониторинг', view: dashboard, live: true },
+  { path: 'problems', title: 'Проблемы', icon: 'problems', group: 'Мониторинг', view: problems, badge: true, live: true },
+  { path: 'components', title: 'Компоненты', icon: 'components', group: 'Мониторинг', view: components, live: true },
+  { path: 'graph', title: 'Граф связей', icon: 'graph', group: 'Аналитика', view: graph, live: true },
+  { path: 'ml', title: 'ML-модель', icon: 'ml', group: 'Аналитика', view: mlView, live: true },
+  { path: 'model', title: 'Модель', icon: 'model', group: 'Аналитика', view: model },
+  { path: 'playground', title: 'Проверка вызова', icon: 'play', group: 'Инструменты', view: playground },
 ];
 
 const RANGES = [
@@ -48,7 +49,7 @@ function buildNav() {
       nav.append(h('div', { class: 'nav-group' }, group));
     }
     nav.append(h('a', { class: 'nav-item', href: '#/' + r.path, 'data-path': r.path, onclick: () => $('sidebar').classList.remove('open') },
-      h('span', {}, r.icon), h('span', {}, r.title), r.badge ? h('span', { class: 'badge', id: 'nav-badge', hidden: true }, '0') : null));
+      icon(r.icon), h('span', {}, r.title), r.badge ? h('span', { class: 'badge', id: 'nav-badge', hidden: true }, '0') : null));
   }
 }
 
@@ -121,6 +122,8 @@ function schedule() {
 }
 
 function init() {
+  $('menu-btn').append(icon('menu'));
+  $('key-btn').append(icon('key'));
   buildNav();
   buildRange();
   $('auto').addEventListener('change', schedule);

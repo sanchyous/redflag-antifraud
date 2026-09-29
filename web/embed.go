@@ -4,7 +4,7 @@ package web
 
 import "embed"
 
-// FS — файлы панели: index.html, css/, js/.
+// FS — файлы панели: index.html, css/, js/, fonts/.
 //
-//go:embed index.html css js
+//go:embed index.html css js fonts
 var FS embed.FS

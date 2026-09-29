@@ -77,9 +77,9 @@ export async function render(root, ctx) {
       h('div', { class: 'wide' }, button)));
 
   root.replaceChildren(h('div', { class: 'grid cols-2' },
-    widget('Параметры вызова', formEl, { sub: 'сообщается только «конверт», без содержимого разговора' }),
-    widget('Решение', result, { sub: 'ответ ядра' })));
-  result.replaceChildren(h('div', { class: 'empty' }, 'Выберите сценарий или заполните форму и нажмите «Оценить вызов»'));
+    widget('Параметры вызова', formEl),
+    widget('Решение', result)));
+  result.replaceChildren(h('div', { class: 'empty' }, 'Выберите сценарий и нажмите «Оценить вызов»'));
 }
 
 export function verdictCard(r) {
@@ -89,25 +89,25 @@ export function verdictCard(r) {
   return h('div', {},
     h('div', { class: 'verdict ' + r.decision },
       h('div', {}, h('div', { class: 'big' }, (DECISION_RU[r.decision] || r.decision).toUpperCase()),
-        h('div', { class: 'muted' }, `score ${r.score.toFixed(4)} · ${r.stage === 'ml' ? 'ML-сервис' : 'линейная модель'} · ${fmt.us(r.latency_us)}`)),
+        h('div', { class: 'muted' }, `score ${r.score.toFixed(4)} · ${r.stage === 'ml' ? 'ML' : 'линейная модель'} · ${fmt.us(r.latency_us)}`)),
       h('div', { class: 'scorebar', title: 'вероятность риска' }, h('i', { style: `width:${Math.min(100, Math.max(2, r.score * 100))}%` }))),
     r.summary ? h('p', { style: 'margin:0 0 10px;font-size:14px;line-height:1.45' }, r.summary) : null,
     h('div', { style: 'margin-bottom:8px' }, h('span', { class: 'mono' }, `${r.caller.masked || '(скрыт)'} → ${r.callee.masked || '?'}`)),
     h('div', { class: 'muted', style: 'margin-bottom:8px;font-size:13px' },
       `${r.caller.region || '?'}${r.caller.operator ? ' · ' + r.caller.operator : ''} → ${r.callee.region || '?'}${r.callee.operator ? ' · ' + r.callee.operator : ''}`),
     r.safe_class ? h('div', { style: 'margin-bottom:8px' }, h('span', { class: 'chip' }, 'защитный класс: ' + r.safe_class)) : null,
-    r.rule_floor ? h('div', { class: 'chip hot' }, 'правило: подмена номера — не ниже «проверка»') : null,
-    r.block_suppressed ? h('div', { class: 'chip' }, 'блок отменён защитой') : null,
+    r.rule_floor ? h('div', { class: 'chip hot' }, 'правило: подмена номера') : null,
+    r.block_suppressed ? h('div', { class: 'chip' }, 'блок заменён проверкой') : null,
     chips.length ? h('div', { style: 'margin:8px 0' }, chips) : null,
-    h('h3', { style: 'margin:14px 0 4px;font-size:14px' }, 'Факторы решения'),
+    h('h3', { style: 'margin:14px 0 4px;font-size:14px' }, 'Факторы'),
     reasons.length ? reasons.map((x) => {
       const up = x.contribution >= 0;
       return h('div', { style: 'margin:9px 0' },
         h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
           h('span', {}, isRule(x.factor) ? h('b', {}, x.text) : [h('b', {}, factorName(x.factor)), h('span', { class: 'muted' }, ' — ' + x.text)]),
-          h('span', { class: 'mono', style: `color:${up ? 'var(--high)' : 'var(--ok-dark)'}` }, x.contribution === 0 ? 'правило' : fmt.signed(x.contribution))),
+          h('span', { class: 'mono', style: `color:${up ? 'var(--red)' : 'var(--s2)'}` }, x.contribution === 0 ? 'правило' : fmt.signed(x.contribution))),
         h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
           h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
-          h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--high)' : 'var(--ok-dark)'};${up ? 'left:50%;' : 'right:50%;'}width:${(Math.abs(x.contribution) / maxAbs) * 50}%` })));
-    }) : h('div', { class: 'muted' }, 'Для решения «пропуск» причины не формируются: рискованных факторов нет.'));
+          h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--red)' : 'var(--s2)'};${up ? 'left:50%;' : 'right:50%;'}width:${(Math.abs(x.contribution) / maxAbs) * 50}%` })));
+    }) : h('div', { class: 'muted' }, 'Рискованных факторов нет'));
 }

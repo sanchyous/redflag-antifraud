@@ -9,12 +9,12 @@ export function componentStatuses(s) {
   const out = [];
   out.push({ name: 'Ядро скоринга', state: 'ok', info: `${e.stage1.version} · ${fmt.int(e.tracked_numbers)} номеров в окнах` });
 
-  if (!e.ml.enabled) out.push({ name: 'ML-сервис', state: 'warn', info: 'не подключён (только линейная стадия)' });
-  else if (e.ml.breaker_open) out.push({ name: 'ML-сервис', state: 'bad', info: 'недоступен: breaker открыт, решает линейная стадия' });
-  else if (!e.ml.active) out.push({ name: 'ML-сервис', state: 'warn', info: 'модель ещё не загружена ядром' });
+  if (!e.ml.enabled) out.push({ name: 'ML-сервис', state: 'warn', info: 'не подключён' });
+  else if (e.ml.breaker_open) out.push({ name: 'ML-сервис', state: 'bad', info: 'недоступен, решает линейная стадия' });
+  else if (!e.ml.active) out.push({ name: 'ML-сервис', state: 'warn', info: 'модель не загружена' });
   else out.push({ name: 'ML-сервис', state: 'ok', info: `${e.ml.version} · ворота ${fmt.num(e.ml.gate, 4)}` });
 
-  if (!e.numplan.enabled) out.push({ name: 'Справочник номеров', state: 'warn', info: 'не загружен: нет регионов и операторов' });
+  if (!e.numplan.enabled) out.push({ name: 'Справочник номеров', state: 'warn', info: 'не загружен' });
   else out.push({ name: 'Справочник номеров', state: 'ok', info: `${fmt.int(e.numplan.ranges)} диапазонов · ${e.numplan.version}` });
 
   if (!s.store.enabled) out.push({ name: 'Журнал (Postgres)', state: 'warn', info: 'отключён' });

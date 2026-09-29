@@ -1,6 +1,8 @@
 // Общие помощники интерфейса. Весь DOM строится через h() и textContent — данные из API никогда не попадают
 // в разметку как HTML (защита от внедрения через маскированные номера, тексты причин и т.п.).
 
+import { icon } from './icons.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** h('div', {class: 'a', onclick: fn}, 'текст', node, [ещё узлы]) → Element */
@@ -77,7 +79,7 @@ export function toast(message, bad = false) {
 export function openDrawer(title, node) {
   const d = document.getElementById('drawer');
   d.replaceChildren(
-    h('header', {}, h('span', {}, title), h('button', { class: 'icon-btn x', onclick: closeDrawer, 'aria-label': 'Закрыть' }, '✕')),
+    h('header', {}, h('span', {}, title), h('button', { class: 'icon-btn x', onclick: closeDrawer, 'aria-label': 'Закрыть' }, icon('close'))),
     h('div', { class: 'body' }, node),
   );
   d.hidden = false;

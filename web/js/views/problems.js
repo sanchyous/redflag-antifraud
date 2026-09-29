@@ -41,15 +41,15 @@ export function openEvent(e) {
     return h('div', { style: 'margin:10px 0' },
       h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
         h('span', {}, isRule(r.factor) ? h('b', {}, r.text) : [h('b', {}, factorName(r.factor)), h('span', { class: 'muted' }, ' — ' + r.text)]),
-        h('span', { class: 'mono', style: `color:${up ? 'var(--high)' : 'var(--ok-dark)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
+        h('span', { class: 'mono', style: `color:${up ? 'var(--red)' : 'var(--s2)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
       h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
         h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
-        h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--high)' : 'var(--ok-dark)'};${up ? 'left:50%;' : `right:50%;`}width:${w}%` })));
+        h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--red)' : 'var(--s2)'};${up ? 'left:50%;' : `right:50%;`}width:${w}%` })));
   }));
   const kv = h('dl', { class: 'kv' },
     h('dt', {}, 'Решение'), h('dd', {}, sevBadge(e.decision)),
     h('dt', {}, 'Score'), h('dd', {}, e.score.toFixed(4)),
-    h('dt', {}, 'Стадия'), h('dd', {}, e.stage === 'ml' ? 'ML-сервис (CatBoost, SHAP)' : 'линейная модель ядра'),
+    h('dt', {}, 'Стадия'), h('dd', {}, e.stage === 'ml' ? 'ML (CatBoost)' : 'линейная модель'),
     h('dt', {}, 'Вызов'), h('dd', { class: 'mono' }, `${e.caller} → ${e.callee}`),
     h('dt', {}, 'Регионы'), h('dd', {}, regionLine(e)),
     h('dt', {}, 'Идентификатор'), h('dd', { class: 'mono' }, e.call_id),
@@ -57,11 +57,11 @@ export function openEvent(e) {
     h('dt', {}, 'Сигналы'), h('dd', {}, (e.signals || []).length ? e.signals.map((s) => h('span', { class: 'chip hot' }, signalName(s))) : '—'),
     h('dt', {}, 'Задержка'), h('dd', {}, fmt.us(e.latency_us)),
     e.rule_floor ? h('dt', {}, 'Пол-правило') : null,
-    e.rule_floor ? h('dd', {}, 'Модель не сочла вызов рискованным, но подмена номера — прямое свидетельство: вердикт не ниже «проверка».') : null,
+    e.rule_floor ? h('dd', {}, 'Поднято правилом: подмена номера — не ниже «проверки».') : null,
     e.block_suppressed ? h('dt', {}, 'Защита') : null,
-    e.block_suppressed ? h('dd', {}, 'Блок отменён защитным классом (проверенный или сервисный номер) — оставлена проверка.') : null);
-  openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Почему такое решение'),
-    h('div', { class: 'muted', style: 'font-size:12px' }, 'Вклад фактора в логит риска: вправо — повышает, влево — снижает.'), contrib));
+    e.block_suppressed ? h('dd', {}, 'Блок заменён проверкой: защитный класс.') : null);
+  openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Факторы'),
+    h('div', { class: 'muted', style: 'font-size:12px' }, 'вправо — повышает риск, влево — снижает'), contrib));
 }
 
 export async function render(root, ctx) {
@@ -72,6 +72,6 @@ export async function render(root, ctx) {
     onclick: () => { ctx.problemsFilter = value; ctx.rerender(); },
   }, label);
   root.replaceChildren(widget('Рискованные вызовы',
-    data.items.length ? eventTable(data.items) : h('div', { class: 'empty' }, 'Рискованных вызовов пока нет. Отправьте вызов в «Проверке вызова» или запустите scripts/demo.py.'),
+    data.items.length ? eventTable(data.items) : h('div', { class: 'empty' }, 'Рискованных вызовов нет'),
     { sub: h('span', {}, btn('', 'все'), btn('block', 'блокировки'), btn('review', 'проверки')), flush: true }));
 }

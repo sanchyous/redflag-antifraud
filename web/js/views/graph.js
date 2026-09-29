@@ -17,8 +17,7 @@ export async function render(root, ctx) {
   const groups = data.groups || [];
   if (!groups.length) {
     root.replaceChildren(widget('Веера номеров', h('div', { class: 'empty' },
-      'Вееров пока не найдено. Граф пересчитывается раз в 30 секунд по номерам с высокой активностью. ' +
-      'Запустите scripts/demo.py --fan, чтобы увидеть пример.')));
+      'Вееров не найдено')));
     return;
   }
   const selected = groups.find((g) => g.id === ctx.fanSelected) || groups[0];
@@ -51,21 +50,19 @@ function fanGraph(g) {
     const peers = (m.peers || []).slice(0, 3);
     peers.forEach((p, j) => {
       const py = y + (j - (peers.length - 1) / 2) * 8;
-      els.push(svg('line', { x1: xL + 6, y1: y, x2: xR - 6, y2: py, stroke: 'var(--info)', 'stroke-opacity': 0.5, 'stroke-width': 1 }));
-      els.push(svg('circle', { cx: xR, cy: py, r: 3.2, fill: 'var(--info)' }));
+      els.push(svg('line', { x1: xL + 6, y1: y, x2: xR - 6, y2: py, stroke: 'var(--s2)', 'stroke-opacity': 0.4, 'stroke-width': 1 }));
+      els.push(svg('circle', { cx: xR, cy: py, r: 3.2, fill: 'var(--s2)' }));
       if (j === 0) els.push(svg('text', { x: xR + 10, y: py + 3 }, p));
     });
-    els.push(svg('circle', { cx: xL, cy: y, r: 6, fill: 'var(--disaster)' }, svg('title', {}, `${m.number}: ${m.calls} вызовов, ${m.peer_count} разных адресатов`)));
+    els.push(svg('circle', { cx: xL, cy: y, r: 6, fill: 'var(--red)' }, svg('title', {}, `${m.number}: ${m.calls} вызовов, ${m.peer_count} разных адресатов`)));
     els.push(svg('text', { x: xL - 12, y: y + 3.5, 'text-anchor': 'end', style: 'font-size:11px;fill:var(--text)' }, m.number));
     els.push(svg('text', { x: xL + 12, y: y - 6 }, `${m.peer_count} адр.`));
   });
   return h('div', {},
     svg('svg', { class: 'graph', viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Граф веера' }, ...els),
     h('div', { class: 'graph-legend' },
-      h('span', {}, h('i', { class: 'dot', style: 'background:var(--disaster);margin-right:6px' }), 'номера веера'),
-      h('span', {}, h('i', { class: 'dot', style: 'background:var(--info);margin-right:6px' }), 'образец адресатов (маска)'),
+      h('span', {}, h('i', { class: 'dot', style: 'background:var(--red);margin-right:6px' }), 'номера веера'),
+      h('span', {}, h('i', { class: 'dot', style: 'background:var(--s2);margin-right:6px' }), 'адресаты (образец)'),
       g.members.length > members.length ? h('span', {}, `показаны 16 из ${g.members.length}`) : null),
-    h('p', { class: 'muted', style: 'font-size:13px;margin:8px 0 0' },
-      'Признак веера: у номеров общий шаблон (длительность, ритм, доля неотвеченных), а адресаты почти не пересекаются — так обзванивает списки ферма SIM. ' +
-      'Колл-центр с общим пулом клиентов похож по шаблону, но списки пересекаются, поэтому веером не считается.'));
+    );
 }
