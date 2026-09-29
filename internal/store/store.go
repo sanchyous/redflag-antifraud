@@ -28,9 +28,14 @@ CREATE TABLE IF NOT EXISTS call_decisions (
 	created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- Идемпотентность журнала: повторная доставка вызова не пишет дубль.
+-- Миграция обязана быть повторяемой: сервис запускается заново при каждом деплое. Повторное
+-- ADD CONSTRAINT UNIQUE даёт ошибку 42P07 (duplicate_table: индекс уже есть), а не 42710
+-- (duplicate_object), поэтому проверяем наличие ограничения явно, а не ловим конкретный код.
 DO $$ BEGIN
-	ALTER TABLE call_decisions ADD CONSTRAINT call_decisions_call_id_unique UNIQUE (call_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'call_decisions_call_id_unique') THEN
+		ALTER TABLE call_decisions ADD CONSTRAINT call_decisions_call_id_unique UNIQUE (call_id);
+	END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_call_decisions_created_at ON call_decisions (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_call_decisions_decision ON call_decisions (decision, id DESC);
 `

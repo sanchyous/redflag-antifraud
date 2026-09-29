@@ -51,6 +51,23 @@ func TestSaveBatchAndRecent(t *testing.T) {
 	}
 }
 
+// Регрессия: сервис перезапускается при каждом деплое, схема должна применяться повторно без ошибки.
+// (Раньше второй запуск падал: relation "call_decisions_call_id_unique" already exists.)
+func TestOpenIsRepeatable(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		s, err := Open(ctx, url)
+		if err != nil {
+			t.Fatalf("Open #%d: %v", i+1, err)
+		}
+		s.Close()
+	}
+}
+
 func TestItoa(t *testing.T) {
 	for in, want := range map[int]string{0: "0", -5: "0", 7: "7", 100: "100", 1234567: "1234567"} {
 		if got := itoa(in); got != want {
