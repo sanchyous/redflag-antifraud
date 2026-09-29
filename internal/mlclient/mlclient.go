@@ -165,7 +165,7 @@ func (c *Client) Score(ctx context.Context, v *features.Vector, explain bool) (R
 		req.Features[n] = v.Raw[i]
 	}
 	var res Result
-	err := c.do(ctx, http.MethodPost, "/v1/score", &req, &res)
+	err := c.do(ctx, c.cfg.Timeout, http.MethodPost, "/v1/score", &req, &res)
 	if err == nil {
 		err = res.validate()
 	}
@@ -173,17 +173,31 @@ func (c *Client) Score(ctx context.Context, v *features.Vector, explain bool) (R
 	return res, err
 }
 
+// Warmup выполняет один настоящий запрос оценки с большим таймаутом и в обход breaker'а: первый
+// запрос к свежему ML-сервису холодный (новое соединение, первая валидация схемы) и мог бы
+// не уложиться в боевой таймаут, тогда первый же вызов в серой зоне ушёл бы в откат.
+func (c *Client) Warmup(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req := scoreRequest{Features: make(map[string]float32, features.N), Explain: true}
+	for _, n := range features.Names {
+		req.Features[n] = 0
+	}
+	var res Result
+	return c.do(ctx, 3*time.Second, http.MethodPost, "/v1/score", &req, &res)
+}
+
 // Info запрашивает описание модели. Не подчиняется breaker'у: это редкий служебный запрос.
 func (c *Client) Info(ctx context.Context) (Info, error) {
 	var inf Info
-	if err := c.do(ctx, http.MethodGet, "/v1/model", nil, &inf); err != nil {
+	if err := c.do(ctx, c.cfg.Timeout, http.MethodGet, "/v1/model", nil, &inf); err != nil {
 		return Info{}, err
 	}
 	return inf, nil
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
+func (c *Client) do(ctx context.Context, timeout time.Duration, method, path string, body, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var rd io.Reader
 	if body != nil {

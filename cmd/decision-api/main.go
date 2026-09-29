@@ -105,6 +105,9 @@ func main() {
 			logger.Warn("ml_unavailable_at_start", "err", err.Error())
 		} else {
 			logger.Info("ml_ready", "version", eng.MLVersion())
+			if err := eng.WarmupML(rctx); err != nil {
+				logger.Warn("ml_warmup_failed", "err", err.Error())
+			}
 		}
 		cancel()
 	}

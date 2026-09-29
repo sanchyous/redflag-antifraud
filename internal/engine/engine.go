@@ -439,6 +439,14 @@ func (e *Engine) RefreshML(ctx context.Context) error {
 	return nil
 }
 
+// WarmupML прогревает соединение и первый запрос к ML-сервису (ошибка не критична).
+func (e *Engine) WarmupML(ctx context.Context) error {
+	if e.cfg.ML == nil {
+		return nil
+	}
+	return e.cfg.ML.Warmup(ctx)
+}
+
 // MLVersion возвращает версию активной ML-модели ("" — стадия 2 не активна).
 func (e *Engine) MLVersion() string {
 	if st := e.ml.Load(); st != nil {

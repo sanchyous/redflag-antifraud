@@ -193,6 +193,32 @@ func TestConcurrentUse(t *testing.T) {
 	wg.Wait()
 }
 
+func TestWarmupUsesLongTimeoutAndBypassesBreaker(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		time.Sleep(120 * time.Millisecond) // «холодный» первый запрос дольше боевого таймаута
+		_ = json.NewEncoder(w).Encode(Result{Score: 0.1, ModelVersion: "m"})
+	}))
+	defer srv.Close()
+	c, _ := New(Config{BaseURL: srv.URL, Timeout: 30 * time.Millisecond, BreakerFailures: 1})
+	if _, err := c.Score(context.Background(), vec(), false); err == nil {
+		t.Fatal("premise: the regular timeout is shorter than the cold request")
+	}
+	if !c.Open() {
+		t.Fatal("premise: the breaker must be open now")
+	}
+	if err := c.Warmup(context.Background()); err != nil {
+		t.Fatalf("warmup must succeed with its long timeout even with an open breaker: %v", err)
+	}
+	if c.cfg.Timeout != 30*time.Millisecond {
+		t.Fatalf("regular timeout must stay untouched, got %v", c.cfg.Timeout)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("server calls = %d", calls.Load())
+	}
+}
+
 func TestScoreOutOfRangeRejected(t *testing.T) {
 	for _, body := range []string{`{"score":1.7,"model_version":"m"}`, `{"score":-0.1,"model_version":"m"}`} {
 		body := body
