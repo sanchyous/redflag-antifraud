@@ -6,6 +6,7 @@ package explain
 import (
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/sanchyous/redflag-antifraud/internal/features"
 	"github.com/sanchyous/redflag-antifraud/internal/scoring"
@@ -115,4 +116,51 @@ func Text(feature int, raw float32) string {
 		return fmt.Sprintf("на того же абонента оформлено ещё %d номеров", n)
 	}
 	return features.Names[feature]
+}
+
+// MLContribution — вклад признака из ML-сервиса (SHAP), в терминах имён признаков.
+type MLContribution struct {
+	Feature      string
+	Value        float64
+	Contribution float64
+}
+
+var nameIndex = func() map[string]int {
+	m := make(map[string]int, features.N)
+	for i, n := range features.Names {
+		m[n] = i
+	}
+	return m
+}()
+
+// FromML превращает вклады ML-сервиса в причины: до maxPos повышающих риск (вклад не меньше
+// minContribution) и до maxNeg смягчающих. Порядок — по убыванию модуля вклада, как у ядра.
+// Неизвестные ядру признаки пропускаются (защита от рассинхрона версий).
+func FromML(cs []MLContribution, minContribution float64, maxPos, maxNeg int) []Reason {
+	out := make([]Reason, 0, maxPos+maxNeg)
+	var pos, neg []Reason
+	for _, c := range cs {
+		idx, ok := nameIndex[c.Feature]
+		if !ok {
+			continue
+		}
+		r := Reason{Factor: c.Feature, Value: round(c.Value), Contribution: round(c.Contribution), Text: Text(idx, float32(c.Value))}
+		switch {
+		case c.Contribution >= minContribution:
+			r.Effect = "raises"
+			pos = append(pos, r)
+		case -c.Contribution >= minContribution:
+			r.Effect = "lowers"
+			neg = append(neg, r)
+		}
+	}
+	sort.SliceStable(pos, func(i, j int) bool { return pos[i].Contribution > pos[j].Contribution })
+	sort.SliceStable(neg, func(i, j int) bool { return neg[i].Contribution < neg[j].Contribution })
+	if len(pos) > maxPos {
+		pos = pos[:maxPos]
+	}
+	if len(neg) > maxNeg {
+		neg = neg[:maxNeg]
+	}
+	return append(append(out, pos...), neg...)
 }

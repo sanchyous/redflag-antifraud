@@ -117,6 +117,10 @@ components:
           description: "Модель и сигналы требовали block, но защитный класс его запретил - выдан review."
         duplicate:
           type: boolean
+        stage:
+          type: string
+          enum: [linear, ml]
+          description: "Какая стадия каскада приняла решение. linear - ядро (Go), ml - ML-сервис (CatBoost, вклады SHAP). При сбое ML решение принимает linear."
         model_version:
           type: string
         numplan_version:

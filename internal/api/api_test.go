@@ -105,6 +105,9 @@ func TestScoreTZScenario(t *testing.T) {
 	if rr.Header().Get("X-Request-Id") == "" {
 		t.Fatal("request id header")
 	}
+	if resp.Stage != "linear" {
+		t.Fatalf("without ML the stage must be linear, got %q", resp.Stage)
+	}
 }
 
 func TestScoreRawNumbersNeverEchoed(t *testing.T) {
@@ -258,6 +261,8 @@ func TestMetrics(t *testing.T) {
 		`redflag_score_latency_seconds_count 2`,
 		`redflag_score_latency_seconds_bucket{le="+Inf"} 2`,
 		`redflag_tracked_numbers`,
+		`redflag_ml_calls_total 0`,
+		`redflag_ml_skipped_total 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics lack %q:\n%s", want, body)

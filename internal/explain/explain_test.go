@@ -87,3 +87,30 @@ func TestReasonsFromExplanation(t *testing.T) {
 		t.Fatalf("zero limits: %+v", got)
 	}
 }
+
+func TestFromML(t *testing.T) {
+	cs := []MLContribution{
+		{"out_calls_1h", 340, 1.2},
+		{"spoof", 1, 3.0},
+		{"call_duration", 900, -0.8},
+		{"novel_feature_from_future", 1, 9},
+		{"call_night", 1, 0.01}, // ниже порога
+		{"out_short_share", 0.9, 2.0},
+	}
+	rs := FromML(cs, 0.05, 2, 1)
+	if len(rs) != 3 {
+		t.Fatalf("reasons = %+v", rs)
+	}
+	if rs[0].Factor != "spoof" || rs[1].Factor != "out_short_share" || rs[0].Effect != "raises" {
+		t.Fatalf("positives must be sorted by contribution and capped: %+v", rs)
+	}
+	if rs[2].Factor != "call_duration" || rs[2].Effect != "lowers" || rs[2].Contribution >= 0 {
+		t.Fatalf("mitigating factor: %+v", rs[2])
+	}
+	if rs[1].Text != "90% принятых вызовов короче 10 с" {
+		t.Fatalf("text = %q", rs[1].Text)
+	}
+	if got := FromML(nil, 0.05, 5, 5); got == nil || len(got) != 0 {
+		t.Fatal("empty input must give an empty, non-nil list")
+	}
+}

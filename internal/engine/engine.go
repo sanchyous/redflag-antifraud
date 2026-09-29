@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/explain"
 	"github.com/sanchyous/redflag-antifraud/internal/features"
 	"github.com/sanchyous/redflag-antifraud/internal/graph"
+	"github.com/sanchyous/redflag-antifraud/internal/mlclient"
 	"github.com/sanchyous/redflag-antifraud/internal/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/phone"
 	"github.com/sanchyous/redflag-antifraud/internal/protect"
@@ -51,9 +53,11 @@ type Response struct {
 	SafeClass       string           `json:"safe_class,omitempty"`
 	BlockSuppressed bool             `json:"block_suppressed,omitempty"`
 	Duplicate       bool             `json:"duplicate,omitempty"`
-	ModelVersion    string           `json:"model_version"`
-	NumplanVersion  string           `json:"numplan_version,omitempty"`
-	LatencyUS       int64            `json:"latency_us"`
+	// Stage — какая стадия приняла решение: "linear" (ядро) или "ml" (ML-сервис).
+	Stage          string `json:"stage"`
+	ModelVersion   string `json:"model_version"`
+	NumplanVersion string `json:"numplan_version,omitempty"`
+	LatencyUS      int64  `json:"latency_us"`
 }
 
 // Config — зависимости и параметры ядра.
@@ -68,6 +72,10 @@ type Config struct {
 	FanSpan uint32
 	Loc     *time.Location
 	Now     func() time.Time // источник времени (тесты)
+	// ML — клиент ML-сервиса (стадия 2 каскада). nil — только стадия 1.
+	ML *mlclient.Client
+	// OnMLError вызывается при неудачном обновлении описания ML-модели (логирование).
+	OnMLError func(error)
 	// MaxFutureSkew — максимальный допустимый уход started_at вперёд относительно часов сервера;
 	// 0 — не проверять (по умолчанию: исторические данные и несинхронные часы источника).
 	MaxFutureSkew time.Duration
@@ -78,6 +86,15 @@ type Config struct {
 // Metrics — счётчики решений (атомарные, для /metrics).
 type Metrics struct {
 	Allow, Review, Block, Duplicates, Errors, Emergency, Suppressed atomic.Uint64
+	// Каскад: вызовы в ML, сбои ML, вызовы, обойдённые открытым breaker'ом, решения стадии 2.
+	MLCalls, MLErrors, MLSkipped, MLDecisions atomic.Uint64
+}
+
+// mlState — то, что ядро знает о ML-модели: политика и ворота, подобранные при обучении.
+type mlState struct {
+	Policy  decide.Policy
+	Gate    float32
+	Version string
 }
 
 // Engine безопасен для конкурентного использования.
@@ -90,6 +107,7 @@ type Engine struct {
 	fan    graph.Holder
 	model  atomic.Pointer[scoring.Model]
 	policy atomic.Pointer[decide.Policy]
+	ml     atomic.Pointer[mlState]
 	class  *protect.Classifier
 	now    func() time.Time
 
@@ -229,6 +247,7 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 		e.Metrics.Emergency.Add(1)
 		e.Metrics.Allow.Add(1)
 		resp.Decision = decide.Allow.String()
+		resp.Stage = "linear"
 		resp.SafeClass = protect.Emergency.String()
 		resp.Reasons = []explain.Reason{}
 		if a.RawOnly {
@@ -246,18 +265,45 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 	model.Score(&a.Vec, &ex)
 	sig := pol.StrongSignals(&a.Vec)
 	d := pol.Decide(a.Class, ex.Score, sig)
+	score, stage, version := float64(ex.Score), "linear", model.Version
+	var mlContribs []explain.MLContribution
+
+	// Стадия 2: только «серая зона» — оценка стадии 1 не ниже ворот либо есть сильный сигнал.
+	// Любой сбой ML (таймаут, breaker, некорректный ответ) — тихий откат на стадию 1.
+	if st := e.ml.Load(); st != nil && e.cfg.ML != nil && (ex.Score >= st.Gate || sig != 0) {
+		res, err := e.cfg.ML.Score(context.Background(), &a.Vec, true)
+		switch {
+		case err == nil:
+			e.Metrics.MLCalls.Add(1)
+			e.Metrics.MLDecisions.Add(1)
+			d = st.Policy.Decide(a.Class, float32(res.Score), sig)
+			score, stage, version = res.Score, "ml", res.ModelVersion
+			for _, c := range res.Contributions {
+				mlContribs = append(mlContribs, explain.MLContribution{Feature: c.Feature, Value: c.Value, Contribution: c.Contribution})
+			}
+		case errors.Is(err, mlclient.ErrBreakerOpen):
+			e.Metrics.MLSkipped.Add(1)
+		default:
+			e.Metrics.MLCalls.Add(1)
+			e.Metrics.MLErrors.Add(1)
+		}
+	}
 
 	fillParties(&resp, &a.Res)
 	resp.Decision = d.Verdict.String()
-	resp.Score = float64(int(float64(ex.Score)*10000+0.5)) / 10000
+	resp.Score = float64(int(score*10000+0.5)) / 10000
+	resp.Stage, resp.ModelVersion = stage, version
 	resp.Duplicate = a.Dup
 	resp.BlockSuppressed = d.BlockSuppressed
 	resp.SafeClass = a.Class.String()
 	resp.Signals = sig.Names()
-	if d.Verdict != decide.Allow || e.cfg.ExplainAlways {
-		resp.Reasons = explain.Reasons(&ex, 0.05, 6, 2)
-	} else {
+	switch {
+	case d.Verdict == decide.Allow && !e.cfg.ExplainAlways:
 		resp.Reasons = []explain.Reason{}
+	case stage == "ml":
+		resp.Reasons = explain.FromML(mlContribs, 0.05, 6, 2)
+	default:
+		resp.Reasons = explain.Reasons(&ex, 0.05, 6, 2)
 	}
 	switch d.Verdict {
 	case decide.Block:
@@ -317,6 +363,8 @@ func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 	if sweepEvery <= 0 {
 		sweepEvery = 5 * time.Minute
 	}
+	const mlEvery = time.Minute
+	lastML := time.Now()
 	ft := time.NewTicker(fanEvery)
 	st := time.NewTicker(sweepEvery)
 	defer ft.Stop()
@@ -327,10 +375,64 @@ func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 			return
 		case <-ft.C:
 			e.RefreshFan()
+			if e.cfg.ML != nil && time.Since(lastML) >= mlEvery {
+				lastML = time.Now()
+				if err := e.RefreshML(ctx); err != nil && e.cfg.OnMLError != nil {
+					e.cfg.OnMLError(err)
+				}
+			}
 		case <-st.C:
 			now := e.now().Unix()
 			e.win.Sweep(now)
 			e.dedupe.Sweep(now)
 		}
 	}
+}
+
+// RefreshML читает у ML-сервиса описание модели и обновляет пороги и ворота каскада.
+// Проверяется контракт: список признаков ML должен совпадать со списком ядра; иначе стадия 2
+// отключается (лучше стадия 1, чем оценка по рассинхронизированным признакам).
+func (e *Engine) RefreshML(ctx context.Context) error {
+	if e.cfg.ML == nil {
+		return nil
+	}
+	inf, err := e.cfg.ML.Info(ctx)
+	if err != nil {
+		return err // текущее состояние не трогаем: временный сбой не должен отключать ML
+	}
+	fail := func(err error) error {
+		e.ml.Store(nil)
+		return err
+	}
+	if len(inf.Features) != features.N {
+		return fail(fmt.Errorf("engine: ML model has %d features, core has %d", len(inf.Features), features.N))
+	}
+	for i, n := range features.Names {
+		if inf.Features[i] != n {
+			return fail(fmt.Errorf("engine: ML feature %d is %q, core expects %q", i, inf.Features[i], n))
+		}
+	}
+	th := inf.Thresholds
+	review, block := float32(th["review"]), float32(th["block"])
+	if !(review > 0 && review <= block && block <= 1) {
+		return fail(fmt.Errorf("engine: ML thresholds invalid: review=%v block=%v", review, block))
+	}
+	gate := float32(th["gate"])
+	if gate < 0 || gate > 1 {
+		return fail(fmt.Errorf("engine: ML gate out of range: %v", gate))
+	}
+	pol := decide.Policy{Review: review, Block: block, MinStrong: int(th["min_signals"])}
+	base := e.policy.Load()
+	pol.BurstCalls1h, pol.BurstShare, pol.SweepRegions = base.BurstCalls1h, base.BurstShare, base.SweepRegions
+	pol.FarmNumbers, pol.RobotIndex, pol.RobotCalls1h = base.FarmNumbers, base.RobotIndex, base.RobotCalls1h
+	e.ml.Store(&mlState{Policy: pol.Defaults(), Gate: gate, Version: inf.Version})
+	return nil
+}
+
+// MLVersion возвращает версию активной ML-модели ("" — стадия 2 не активна).
+func (e *Engine) MLVersion() string {
+	if st := e.ml.Load(); st != nil {
+		return st.Version
+	}
+	return ""
 }

@@ -44,6 +44,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	counter("redflag_duplicates_total", m.Duplicates.Load())
 	counter("redflag_errors_total", m.Errors.Load())
 	counter("redflag_score_panics_total", s.panics.Load())
+	counter("redflag_ml_calls_total", m.MLCalls.Load())
+	counter("redflag_ml_decisions_total", m.MLDecisions.Load())
+	counter("redflag_ml_errors_total", m.MLErrors.Load())
+	counter("redflag_ml_skipped_total", m.MLSkipped.Load()) // breaker открыт: откат на стадию 1
 	gauge := func(name string, v int) {
 		fmt.Fprintf(&b, "# TYPE %s gauge\n%s %d\n", name, name, v)
 	}

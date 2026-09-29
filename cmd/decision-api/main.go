@@ -17,6 +17,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/decide"
 	"github.com/sanchyous/redflag-antifraud/internal/engine"
 	"github.com/sanchyous/redflag-antifraud/internal/journal"
+	"github.com/sanchyous/redflag-antifraud/internal/mlclient"
 	"github.com/sanchyous/redflag-antifraud/internal/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/scoring"
@@ -63,7 +64,24 @@ func main() {
 	}
 	logger.Info("model_ready", "version", model.Version, "review", model.Review, "block", model.Block)
 
+	// Стадия 2 каскада — ML-сервис (Python). Не задан ML_URL — работает только стадия 1.
+	var mlc *mlclient.Client
+	if cfg.MLURL != "" {
+		mlc, err = mlclient.New(mlclient.Config{
+			BaseURL: cfg.MLURL, APIKey: cfg.MLAPIKey, Timeout: time.Duration(cfg.MLTimeoutMS) * time.Millisecond,
+			BreakerFailures: cfg.MLBreakerFails, BreakerCooldown: time.Duration(cfg.MLBreakerCooldownSec) * time.Second,
+		})
+		if err != nil {
+			logger.Error("ml_client_init_failed", "err", err.Error())
+			os.Exit(1)
+		}
+	} else {
+		logger.Warn("ml_disabled", "reason", "ML_URL not set: only the linear stage is used")
+	}
+
 	eng, err := engine.New(engine.Config{
+		ML:         mlc,
+		OnMLError:  func(err error) { logger.Warn("ml_refresh_failed", "err", err.Error()) },
 		Plan:       plan,
 		Classifier: classifier,
 		Model:      model,
@@ -80,6 +98,16 @@ func main() {
 
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
+	if mlc != nil {
+		// ML может подняться позже ядра: недоступность на старте не фатальна, обновление — в фоне.
+		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := eng.RefreshML(rctx); err != nil {
+			logger.Warn("ml_unavailable_at_start", "err", err.Error())
+		} else {
+			logger.Info("ml_ready", "version", eng.MLVersion())
+		}
+		cancel()
+	}
 	go eng.Run(runCtx, time.Duration(cfg.FanEverySec)*time.Second, 5*time.Minute)
 
 	// Postgres — журнал решений. Пустой DATABASE_URL = журнал отключён.
@@ -179,24 +207,29 @@ func loadAllowlist(path string, log *slog.Logger) (*protect.Classifier, error) {
 }
 
 type config struct {
-	Addr               string
-	DatabaseURL        string
-	APIKey             string
-	FailOpen           bool
-	NumplanDir         string
-	AllowlistFile      string
-	ModelFile          string
-	ReviewThreshold    float64
-	BlockThreshold     float64
-	MinStrong          int
-	WindowMaxEvents    int
-	WindowMaxNumbers   int
-	ShortCallSec       int
-	MaxFutureSkewSec   int
-	FanEverySec        int
-	JournalAllowSample float64
-	LogLevel           string
-	LogFormat          string
+	Addr                 string
+	DatabaseURL          string
+	APIKey               string
+	FailOpen             bool
+	NumplanDir           string
+	AllowlistFile        string
+	ModelFile            string
+	ReviewThreshold      float64
+	BlockThreshold       float64
+	MinStrong            int
+	WindowMaxEvents      int
+	WindowMaxNumbers     int
+	ShortCallSec         int
+	MaxFutureSkewSec     int
+	FanEverySec          int
+	JournalAllowSample   float64
+	MLURL                string
+	MLAPIKey             string
+	MLTimeoutMS          int
+	MLBreakerFails       int
+	MLBreakerCooldownSec int
+	LogLevel             string
+	LogFormat            string
 }
 
 func loadConfig() config {
@@ -210,17 +243,22 @@ func loadConfig() config {
 		AllowlistFile: os.Getenv("ALLOWLIST_FILE"),
 		ModelFile:     os.Getenv("MODEL_FILE"),
 		// 0 — взять порог из файла модели.
-		ReviewThreshold:    envFloat("REVIEW_THRESHOLD", 0),
-		BlockThreshold:     envFloat("BLOCK_THRESHOLD", 0),
-		MinStrong:          envInt("BLOCK_MIN_SIGNALS", 2),
-		WindowMaxEvents:    envInt("WINDOW_MAX_EVENTS", 512),
-		WindowMaxNumbers:   envInt("WINDOW_MAX_NUMBERS", 4_000_000),
-		ShortCallSec:       envInt("SHORT_CALL_SEC", 10),
-		MaxFutureSkewSec:   envInt("MAX_FUTURE_SKEW_SEC", 0),
-		FanEverySec:        envInt("FAN_REFRESH_SEC", 30),
-		JournalAllowSample: envFloat("JOURNAL_ALLOW_SAMPLE", 0.01),
-		LogLevel:           env("LOG_LEVEL", "info"),
-		LogFormat:          env("LOG_FORMAT", "text"),
+		ReviewThreshold:      envFloat("REVIEW_THRESHOLD", 0),
+		BlockThreshold:       envFloat("BLOCK_THRESHOLD", 0),
+		MinStrong:            envInt("BLOCK_MIN_SIGNALS", 2),
+		WindowMaxEvents:      envInt("WINDOW_MAX_EVENTS", 512),
+		WindowMaxNumbers:     envInt("WINDOW_MAX_NUMBERS", 4_000_000),
+		ShortCallSec:         envInt("SHORT_CALL_SEC", 10),
+		MaxFutureSkewSec:     envInt("MAX_FUTURE_SKEW_SEC", 0),
+		FanEverySec:          envInt("FAN_REFRESH_SEC", 30),
+		JournalAllowSample:   envFloat("JOURNAL_ALLOW_SAMPLE", 0.01),
+		MLURL:                os.Getenv("ML_URL"),
+		MLAPIKey:             os.Getenv("ML_API_KEY"),
+		MLTimeoutMS:          envInt("ML_TIMEOUT_MS", 25),
+		MLBreakerFails:       envInt("ML_BREAKER_FAILS", 5),
+		MLBreakerCooldownSec: envInt("ML_BREAKER_COOLDOWN_SEC", 10),
+		LogLevel:             env("LOG_LEVEL", "info"),
+		LogFormat:            env("LOG_FORMAT", "text"),
 	}
 }
 
