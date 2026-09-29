@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sanchyous/redflag-antifraud/internal/platform/logx"
 )
 
 type ctxKeyRequestID struct{}
@@ -28,7 +30,9 @@ func (s *Server) withRequestID(next http.Handler) http.Handler {
 			id = newRequestID()
 		}
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyRequestID{}, id)))
+		// request_id кладём и в контекст логирования: любая запись с этим контекстом получит поле автоматически
+		ctx := logx.WithRequestID(context.WithValue(r.Context(), ctxKeyRequestID{}, id), id)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -69,7 +73,6 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 			lvl = slog.LevelDebug
 		}
 		s.Log.Log(r.Context(), lvl, "http_request",
-			"request_id", requestIDFrom(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,

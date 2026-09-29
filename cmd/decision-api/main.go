@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,17 +22,32 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/window"
 	"github.com/sanchyous/redflag-antifraud/internal/platform/journal"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/logx"
 	"github.com/sanchyous/redflag-antifraud/internal/platform/store"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/telemetry"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 )
 
-const version = "1.0.0"
+// version переопределяется при сборке: -ldflags "-X main.version=...".
+var version = "1.1.0"
 
 func main() {
 	cfg := loadConfig()
-	logger := setupLogger(cfg.LogLevel, cfg.LogFormat)
+
+	// Логирование: формат по умолчанию — читаемый на терминале и JSON вне его. Повторяющиеся события горячего пути
+	// (решения) ограничиваются по частоте, предупреждения и ошибки — никогда.
+	base := logx.New(logx.Config{Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "decision-api", Version: version})
+	logger := slog.New(logx.RateLimit(base.Handler(), cfg.LogRatePerSec))
 	slog.SetDefault(logger)
-	logger.Info("starting", "service", "decision-api", "version", version, "addr", cfg.Addr)
+	log := logx.Component(logger, "main")
+
+	log.Info("starting", "addr", cfg.Addr, "go", runtime.Version(), "cpus", runtime.NumCPU(), "gomaxprocs", runtime.GOMAXPROCS(0))
+	log.Info("config", "fail_mode", failMode(cfg.FailOpen), "auth", cfg.APIKey != "", "database", cfg.DatabaseURL != "",
+		"ml", cfg.MLURL != "", "numplan", cfg.NumplanDir != "", "allowlist", cfg.AllowlistFile != "", "log_decisions", cfg.LogDecisions,
+		"window_max_events", cfg.WindowMaxEvents, "window_max_numbers", cfg.WindowMaxNumbers)
+	if cfg.APIKey == "" {
+		log.Warn("api_unprotected", "reason", "API_KEY is empty: anyone who can reach the port can call the API and read the dashboard data")
+	}
 
 	ctx := context.Background()
 
@@ -42,27 +58,27 @@ func main() {
 		var err error
 		plan, err = numplan.LoadDir(cfg.NumplanDir)
 		if err != nil {
-			logger.Error("numplan_load_failed", "dir", cfg.NumplanDir, "err", err.Error())
+			log.Error("numplan_load_failed", "dir", cfg.NumplanDir, "err", err.Error())
 			os.Exit(1)
 		}
-		logger.Info("numplan_loaded", "ranges", plan.Size(), "version", plan.Version,
-			"overlaps", plan.Stats.Overlaps, "skipped", plan.Stats.Skipped, "took_ms", time.Since(t0).Milliseconds())
+		log.Info("numplan_loaded", "ranges", plan.Size(), "regions", plan.RegionCount(), "version", plan.Version,
+			"overlaps", plan.Stats.Overlaps, "skipped", plan.Stats.Skipped, "took", time.Since(t0).Round(time.Millisecond).String())
 	} else {
-		logger.Warn("numplan_disabled", "reason", "NUMPLAN_DIR not set: region/operator features are off")
+		log.Warn("numplan_disabled", "reason", "NUMPLAN_DIR not set: region and operator features are off")
 	}
 
-	classifier, err := loadAllowlist(cfg.AllowlistFile, logger)
+	classifier, err := loadAllowlist(cfg.AllowlistFile, log)
 	if err != nil {
-		logger.Error("allowlist_load_failed", "err", err.Error())
+		log.Error("allowlist_load_failed", "err", err.Error())
 		os.Exit(1)
 	}
 
 	model, err := loadModel(cfg.ModelFile)
 	if err != nil {
-		logger.Error("model_load_failed", "file", cfg.ModelFile, "err", err.Error())
+		log.Error("model_load_failed", "file", cfg.ModelFile, "err", err.Error())
 		os.Exit(1)
 	}
-	logger.Info("model_ready", "version", model.Version, "review", model.Review, "block", model.Block)
+	log.Info("model_ready", "version", model.Version, "review", model.Review, "block", model.Block, "file", cfg.ModelFile)
 
 	// Стадия 2 каскада — ML-сервис (Python). Не задан ML_URL — работает только стадия 1.
 	var mlc *mlclient.Client
@@ -70,18 +86,20 @@ func main() {
 		mlc, err = mlclient.New(mlclient.Config{
 			BaseURL: cfg.MLURL, APIKey: cfg.MLAPIKey, Timeout: time.Duration(cfg.MLTimeoutMS) * time.Millisecond,
 			BreakerFailures: cfg.MLBreakerFails, BreakerCooldown: time.Duration(cfg.MLBreakerCooldownSec) * time.Second,
+			Log: logx.Component(logger, "ml"),
 		})
 		if err != nil {
-			logger.Error("ml_client_init_failed", "err", err.Error())
+			log.Error("ml_client_init_failed", "err", err.Error())
 			os.Exit(1)
 		}
 	} else {
-		logger.Warn("ml_disabled", "reason", "ML_URL not set: only the linear stage is used")
+		log.Warn("ml_disabled", "reason", "ML_URL not set: only the linear stage is used")
 	}
 
 	eng, err := engine.New(engine.Config{
 		ML:         mlc,
-		OnMLError:  func(err error) { logger.Warn("ml_refresh_failed", "err", err.Error()) },
+		Log:        logger,
+		OnMLError:  func(err error) { log.Warn("ml_refresh_failed", "err", err.Error()) },
 		Plan:       plan,
 		Classifier: classifier,
 		Model:      model,
@@ -92,7 +110,7 @@ func main() {
 		Window:        window.Config{MaxEvents: cfg.WindowMaxEvents, MaxNumbers: cfg.WindowMaxNumbers, ShortSec: cfg.ShortCallSec},
 	})
 	if err != nil {
-		logger.Error("engine_init_failed", "err", err.Error())
+		log.Error("engine_init_failed", "err", err.Error())
 		os.Exit(1)
 	}
 
@@ -102,16 +120,18 @@ func main() {
 		// ML может подняться позже ядра: недоступность на старте не фатальна, обновление — в фоне.
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		if err := eng.RefreshML(rctx); err != nil {
-			logger.Warn("ml_unavailable_at_start", "err", err.Error())
-		} else {
-			logger.Info("ml_ready", "version", eng.MLVersion())
-			if err := eng.WarmupML(rctx); err != nil {
-				logger.Warn("ml_warmup_failed", "err", err.Error())
-			}
+			log.Warn("ml_unavailable_at_start", "err", err.Error())
+		} else if err := eng.WarmupML(rctx); err != nil {
+			log.Warn("ml_warmup_failed", "err", err.Error())
 		}
 		cancel()
 	}
 	go eng.Run(runCtx, time.Duration(cfg.FanEverySec)*time.Second, 5*time.Minute)
+
+	// Телеметрия для панели: ряды по секундам и минутам в памяти, свёртка фоном.
+	tel := telemetry.New(nil)
+	stopTel := make(chan struct{})
+	go tel.Run(stopTel)
 
 	// Postgres — журнал решений. Пустой DATABASE_URL = журнал отключён.
 	var st *store.Store
@@ -119,18 +139,21 @@ func main() {
 	if cfg.DatabaseURL != "" {
 		st, err = store.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
-			logger.Error("store_open_failed", "err", err.Error())
+			log.Error("store_open_failed", "err", err.Error())
 			os.Exit(1)
 		}
 		defer st.Close()
-		jr = journal.New(st, journal.Config{AllowSample: cfg.JournalAllowSample}, logger)
+		jr = journal.New(st, journal.Config{AllowSample: cfg.JournalAllowSample}, logx.Component(logger, "journal"))
 		defer jr.Close()
-		logger.Info("store_connected")
+		log.Info("store_connected", "journal_allow_sample", cfg.JournalAllowSample)
 	} else {
-		logger.Warn("store_disabled", "reason", "DATABASE_URL not set")
+		log.Warn("store_disabled", "reason", "DATABASE_URL not set: decisions are not journaled")
 	}
 
-	srv := &api.Server{Engine: eng, Journal: jr, Store: st, APIKey: cfg.APIKey, FailOpen: cfg.FailOpen, Log: logger}
+	srv := &api.Server{
+		Engine: eng, Journal: jr, Store: st, APIKey: cfg.APIKey, FailOpen: cfg.FailOpen,
+		Log: logx.Component(logger, "api"), Version: version, LogDecisions: cfg.LogDecisions, Tel: tel,
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Routes(),
@@ -139,11 +162,12 @@ func main() {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    16 << 10,
+		ErrorLog:          slog.NewLogLogger(logx.Component(logger, "http").Handler(), slog.LevelWarn),
 	}
 	go func() {
-		logger.Info("listening")
+		log.Info("listening", "addr", cfg.Addr, "ui", "/ui/", "docs", "/docs")
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("listen_failed", "err", err.Error())
+			log.Error("listen_failed", "err", err.Error())
 			os.Exit(1)
 		}
 	}()
@@ -154,29 +178,37 @@ func main() {
 	for sig := range sigs {
 		if sig == syscall.SIGHUP {
 			if cfg.ModelFile == "" {
-				logger.Warn("reload_skipped", "reason", "MODEL_FILE not set")
+				log.Warn("reload_skipped", "reason", "MODEL_FILE not set")
 				continue
 			}
 			m, err := loadModel(cfg.ModelFile)
 			if err != nil {
-				logger.Error("model_reload_failed", "err", err.Error())
+				log.Error("model_reload_failed", "err", err.Error())
 				continue
 			}
 			eng.SetModel(m)
-			logger.Info("model_reloaded", "version", m.Version)
+			log.Info("model_reloaded", "version", m.Version, "review", m.Review, "block", m.Block)
 			continue
 		}
-		logger.Info("shutting_down", "signal", sig.String())
+		log.Info("shutting_down", "signal", sig.String())
 		break
 	}
 
 	cancelRun()
+	close(stopTel)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown_error", "err", err.Error())
+		log.Error("shutdown_error", "err", err.Error())
 	}
-	logger.Info("stopped")
+	log.Info("stopped", "uptime", time.Since(tel.Started()).Round(time.Second).String())
+}
+
+func failMode(open bool) string {
+	if open {
+		return "open"
+	}
+	return "closed"
 }
 
 func loadModel(path string) (*scoring.Model, error) {
@@ -205,7 +237,7 @@ func loadAllowlist(path string, log *slog.Logger) (*protect.Classifier, error) {
 	for _, b := range bad {
 		log.Warn("allowlist_bad_entry", "entry", b)
 	}
-	log.Info("allowlist_loaded", "entries", n, "bad", len(bad))
+	log.Info("allowlist_loaded", "entries", n, "bad", len(bad), "file", path)
 	return c, nil
 }
 
@@ -233,6 +265,8 @@ type config struct {
 	MLBreakerCooldownSec int
 	LogLevel             string
 	LogFormat            string
+	LogDecisions         string
+	LogRatePerSec        int
 }
 
 func loadConfig() config {
@@ -261,7 +295,9 @@ func loadConfig() config {
 		MLBreakerFails:       envInt("ML_BREAKER_FAILS", 5),
 		MLBreakerCooldownSec: envInt("ML_BREAKER_COOLDOWN_SEC", 10),
 		LogLevel:             env("LOG_LEVEL", "info"),
-		LogFormat:            env("LOG_FORMAT", "text"),
+		LogFormat:            os.Getenv("LOG_FORMAT"), // пусто: pretty на терминале, json иначе
+		LogDecisions:         env("LOG_DECISIONS", "flagged"),
+		LogRatePerSec:        envInt("LOG_RATE_PER_SEC", 200),
 	}
 }
 
@@ -288,26 +324,4 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
-}
-
-func setupLogger(level, format string) *slog.Logger {
-	var lvl slog.Level
-	switch strings.ToLower(level) {
-	case "debug":
-		lvl = slog.LevelDebug
-	case "warn":
-		lvl = slog.LevelWarn
-	case "error":
-		lvl = slog.LevelError
-	default:
-		lvl = slog.LevelInfo
-	}
-	opts := &slog.HandlerOptions{Level: lvl}
-	var handler slog.Handler
-	if strings.ToLower(format) == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
-	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	}
-	return slog.New(handler)
 }

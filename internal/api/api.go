@@ -17,6 +17,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/platform/journal"
 	"github.com/sanchyous/redflag-antifraud/internal/platform/store"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/telemetry"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 )
 
@@ -34,6 +35,11 @@ type Server struct {
 	APIKey   string           // пусто — auth отключён (dev)
 	FailOpen bool             // при сбое скоринга: true → allow, false → review
 	Log      *slog.Logger
+	Version  string // версия сборки (для панели и логов)
+	// LogDecisions — какие решения писать в лог как события: "flagged" (по умолчанию: review и block),
+	// "all" (и allow на уровне debug) или "off".
+	LogDecisions string
+	Tel          *telemetry.Recorder // nil — создаётся при первом вызове Routes
 
 	lat    latencyHist
 	panics atomic.Uint64
@@ -41,7 +47,11 @@ type Server struct {
 
 // Routes собирает маршруты с middleware.
 func (s *Server) Routes() http.Handler {
+	if s.Tel == nil {
+		s.Tel = telemetry.New(nil)
+	}
 	mux := http.NewServeMux()
+	s.mountUI(mux)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	mux.HandleFunc("GET /docs", s.handleDocs)
@@ -49,6 +59,11 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("POST /v1/calls/score", s.protect(http.HandlerFunc(s.handleScore)))
 	mux.Handle("POST /v1/calls/score/batch", s.protect(http.HandlerFunc(s.handleBatch)))
 	mux.Handle("GET /v1/calls/recent", s.protect(http.HandlerFunc(s.handleRecent)))
+	mux.Handle("GET /v1/status", s.protect(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("GET /v1/stats", s.protect(http.HandlerFunc(s.handleStats)))
+	mux.Handle("GET /v1/events", s.protect(http.HandlerFunc(s.handleEvents)))
+	mux.Handle("GET /v1/model", s.protect(http.HandlerFunc(s.handleModel)))
+	mux.Handle("GET /v1/graph/fans", s.protect(http.HandlerFunc(s.handleFans)))
 	return s.withRequestID(s.withLogging(s.withRecover(mux)))
 }
 
@@ -87,7 +102,10 @@ func fallback(c *callrec.Call, failOpen bool) engine.Response {
 	return r
 }
 
-func (s *Server) record(resp *engine.Response) {
+// record фиксирует итог скоринга: телеметрия панели, событие в логе, журнал.
+func (s *Server) record(ctx context.Context, resp *engine.Response) {
+	s.observe(resp)
+	s.logDecision(ctx, resp)
 	if s.Journal == nil || !s.Journal.Wants(resp.Decision, resp.CallID) {
 		return
 	}
@@ -121,7 +139,7 @@ func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
-	s.record(&resp)
+	s.record(r.Context(), &resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -168,7 +186,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		s.record(&resp)
+		s.record(r.Context(), &resp)
 		items[i].Result = &resp
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": items})
@@ -208,6 +226,7 @@ func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) badRequest(w http.ResponseWriter, reqID, code string) {
+	s.Tel.ObserveError()
 	w.Header().Set("X-Request-Id", reqID)
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": code, "request_id": reqID})
 }

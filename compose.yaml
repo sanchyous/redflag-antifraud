@@ -21,8 +21,10 @@ services:
       MAX_FUTURE_SKEW_SEC: "${MAX_FUTURE_SKEW_SEC:-0}"
       FAN_REFRESH_SEC: "${FAN_REFRESH_SEC:-30}"
       JOURNAL_ALLOW_SAMPLE: "${JOURNAL_ALLOW_SAMPLE:-0.01}"
-      LOG_FORMAT: "json"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LOG_DECISIONS: "${LOG_DECISIONS:-flagged}"
+      LOG_RATE_PER_SEC: "${LOG_RATE_PER_SEC:-200}"
       API_KEY: "${API_KEY:-}"
       FAIL_MODE: "${FAIL_MODE:-open}"
       ML_URL: "${ML_URL:-}"
@@ -55,6 +57,8 @@ services:
     environment:
       MODEL_DIR: "/models"
       API_KEY: "${ML_API_KEY:-}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
     volumes:
       - "${ML_MODELS_HOST_DIR:-./data/models}:/models:ro"
     healthcheck:

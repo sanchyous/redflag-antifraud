@@ -1,0 +1,77 @@
+// «Проблемы» — рискованные решения (проверка и блок), по аналогии с Problems в Zabbix. Клик по строке открывает
+// разбор: факторы с вкладом в решение (то самое «объяснение», которого требует ТЗ).
+
+import { getEvents } from '../api.js';
+import { factorName, signalName } from '../labels.js';
+import { fmt, h, openDrawer, sevBadge, widget } from '../ui.js';
+
+const STRONG = new Set(['spoof', 'unallocated_caller', 'fan']);
+
+/** Таблица событий. compact — без столбца стадии и времени в полном виде. */
+export function eventTable(items, { compact = false } = {}) {
+  const head = h('tr', {}, h('th', {}, 'Время'), h('th', {}, 'Серьёзность'), h('th', {}, 'Вызов'), h('th', {}, 'Причина'),
+    h('th', { class: 'num' }, 'Score'), compact ? null : h('th', {}, 'Стадия'), compact ? null : h('th', {}, 'Сигналы'));
+  const rows = items.map((e) => {
+    const top = (e.reasons || []).find((r) => r.effect === 'raises');
+    return h('tr', { class: 'row', onclick: () => openEvent(e) },
+      h('td', { class: 'muted', title: fmt.dateTime(e.time) }, compact ? fmt.ago(e.time) : fmt.dateTime(e.time)),
+      h('td', {}, sevBadge(e.decision)),
+      h('td', {}, h('div', { class: 'mono' }, `${e.caller} → ${e.callee}`), h('div', { class: 'muted', style: 'font-size:12px' }, regionLine(e))),
+      h('td', {}, top ? top.text : '—', e.rule_floor ? h('span', { class: 'chip hot', title: 'вердикт поднят жёстким правилом' }, 'правило') : null),
+      h('td', { class: 'num' }, e.score.toFixed(4)),
+      compact ? null : h('td', {}, e.stage === 'ml' ? 'ML' : 'линейная'),
+      compact ? null : h('td', {}, (e.signals || []).map((s) => h('span', { class: 'chip' + (STRONG.has(s) ? ' hot' : '') }, signalName(s)))));
+  });
+  return h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, head), h('tbody', {}, rows)));
+}
+
+function regionLine(e) {
+  const a = e.caller_region || '?';
+  const b = e.callee_region || '?';
+  return `${a} → ${b}`;
+}
+
+/** Панель разбора: решение, сигналы и вклад каждого фактора (полоса вправо — повышает риск, влево — снижает). */
+export function openEvent(e) {
+  const reasons = e.reasons || [];
+  const maxAbs = Math.max(0.01, ...reasons.map((r) => Math.abs(r.contribution)));
+  const contrib = h('div', {}, reasons.map((r) => {
+    const w = (Math.abs(r.contribution) / maxAbs) * 50;
+    const up = r.contribution >= 0;
+    return h('div', { style: 'margin:10px 0' },
+      h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
+        h('span', {}, h('b', {}, factorName(r.factor)), h('span', { class: 'muted' }, ' — ' + r.text)),
+        h('span', { class: 'mono', style: `color:${up ? 'var(--high)' : 'var(--ok-dark)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
+      h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
+        h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
+        h('div', { style: `position:absolute;top:0;bottom:0;border-radius:5px;background:${up ? 'var(--high)' : 'var(--ok-dark)'};${up ? 'left:50%;' : `right:50%;`}width:${w}%` })));
+  }));
+  const kv = h('dl', { class: 'kv' },
+    h('dt', {}, 'Решение'), h('dd', {}, sevBadge(e.decision)),
+    h('dt', {}, 'Score'), h('dd', {}, e.score.toFixed(4)),
+    h('dt', {}, 'Стадия'), h('dd', {}, e.stage === 'ml' ? 'ML-сервис (CatBoost, SHAP)' : 'линейная модель ядра'),
+    h('dt', {}, 'Вызов'), h('dd', { class: 'mono' }, `${e.caller} → ${e.callee}`),
+    h('dt', {}, 'Регионы'), h('dd', {}, regionLine(e)),
+    h('dt', {}, 'Идентификатор'), h('dd', { class: 'mono' }, e.call_id),
+    h('dt', {}, 'Время'), h('dd', {}, fmt.dateTime(e.time)),
+    h('dt', {}, 'Сигналы'), h('dd', {}, (e.signals || []).length ? e.signals.map((s) => h('span', { class: 'chip hot' }, signalName(s))) : '—'),
+    h('dt', {}, 'Задержка'), h('dd', {}, fmt.us(e.latency_us)),
+    e.rule_floor ? h('dt', {}, 'Пол-правило') : null,
+    e.rule_floor ? h('dd', {}, 'Модель не сочла вызов рискованным, но подмена номера — прямое свидетельство: вердикт не ниже «проверка».') : null,
+    e.block_suppressed ? h('dt', {}, 'Защита') : null,
+    e.block_suppressed ? h('dd', {}, 'Блок отменён защитным классом (проверенный или сервисный номер) — оставлена проверка.') : null);
+  openDrawer('Разбор решения', h('div', {}, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Почему такое решение'),
+    h('div', { class: 'muted', style: 'font-size:12px' }, 'Вклад фактора в логит риска: вправо — повышает, влево — снижает.'), contrib));
+}
+
+export async function render(root, ctx) {
+  const filter = ctx.problemsFilter || '';
+  const data = await getEvents(200, filter);
+  const btn = (value, label) => h('button', {
+    class: 'btn small' + (filter === value ? '' : ' ghost'), style: 'margin-right:6px',
+    onclick: () => { ctx.problemsFilter = value; ctx.rerender(); },
+  }, label);
+  root.replaceChildren(widget('Рискованные вызовы',
+    data.items.length ? eventTable(data.items) : h('div', { class: 'empty' }, 'Рискованных вызовов пока нет. Отправьте вызов в «Проверке вызова» или запустите scripts/demo.py.'),
+    { sub: h('span', {}, btn('', 'все'), btn('block', 'блокировки'), btn('review', 'проверки')), flush: true }));
+}
