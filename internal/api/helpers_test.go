@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/sanchyous/redflag-antifraud/internal/callrec"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 )
 
 func callFor(caller, callee string) *callrec.Call {

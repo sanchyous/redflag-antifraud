@@ -16,13 +16,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/sanchyous/redflag-antifraud/internal/features"
-	"github.com/sanchyous/redflag-antifraud/internal/ingest"
-	"github.com/sanchyous/redflag-antifraud/internal/mltrain"
-	"github.com/sanchyous/redflag-antifraud/internal/numplan"
-	"github.com/sanchyous/redflag-antifraud/internal/protect"
-	"github.com/sanchyous/redflag-antifraud/internal/scoring"
-	"github.com/sanchyous/redflag-antifraud/internal/synth"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/scoring"
+	"github.com/sanchyous/redflag-antifraud/internal/detection/features"
+	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/lab/mltrain"
+	"github.com/sanchyous/redflag-antifraud/internal/lab/synth"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/ingest"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 )
 
 func main() {

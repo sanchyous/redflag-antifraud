@@ -1,0 +1,22 @@
+[project]
+name = "redflag-ml"
+version = "1.0.0"
+description = "ML-сервис RedFlag: CatBoost + калибровка + SHAP, обучение и инференс"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["models"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RUF"]
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # кириллица в строках и комментариях — норма для проекта
+  "E501",                        # длину строки контролирует форматтер
+  "B008",                        # Depends() в сигнатурах FastAPI
+  "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E731", "SIM117"]

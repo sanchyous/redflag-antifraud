@@ -6,7 +6,8 @@ __pycache__/
 /infra/
 
 # ML-сервис: артефакты обучения и окружение не коммитим
-/ml-service/models/
-/ml-service/.venv/
-/ml-service/report*.md
+/services/ml/models/
+/services/ml/.venv/
+/services/ml/report*.md
 /dataset/
+/bin/

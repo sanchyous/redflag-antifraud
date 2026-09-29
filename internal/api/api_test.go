@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sanchyous/redflag-antifraud/internal/engine"
-	"github.com/sanchyous/redflag-antifraud/internal/journal"
-	"github.com/sanchyous/redflag-antifraud/internal/numplan"
-	"github.com/sanchyous/redflag-antifraud/internal/protect"
-	"github.com/sanchyous/redflag-antifraud/internal/store"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/engine"
+	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/journal"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/store"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 )
 
 func testPlan(t testing.TB) *numplan.Plan {

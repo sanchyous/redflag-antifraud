@@ -50,7 +50,7 @@ services:
   # линейной стадии, а деплой не зависит от сборки Python-образа.
   ml:
     profiles: ["ml"]
-    build: ./ml-service
+    build: ./services/ml
     restart: unless-stopped
     environment:
       MODEL_DIR: "/models"

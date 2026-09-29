@@ -19,12 +19,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sanchyous/redflag-antifraud/internal/engine"
-	"github.com/sanchyous/redflag-antifraud/internal/ingest"
-	"github.com/sanchyous/redflag-antifraud/internal/mlclient"
-	"github.com/sanchyous/redflag-antifraud/internal/numplan"
-	"github.com/sanchyous/redflag-antifraud/internal/protect"
-	"github.com/sanchyous/redflag-antifraud/internal/scoring"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/engine"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/mlclient"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/scoring"
+	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/ingest"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 )
 
 func main() {
