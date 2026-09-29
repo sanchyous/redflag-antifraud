@@ -12,13 +12,17 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/features"
 	"github.com/sanchyous/redflag-antifraud/internal/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/scoring"
 	"github.com/sanchyous/redflag-antifraud/internal/synth"
 )
 
 // Row — признаки одного вызова с меткой.
 type Row struct {
-	X         [features.N]float32
-	Label     bool // мошеннический
+	X         [features.N]float32 // вход линейной модели (log1p для счётчиков)
+	Raw       [features.N]float32 // значения в исходных единицах (для деревьев и объяснений)
+	TS        int64
+	Score1    float32 // оценка стадии 1 (боевая линейная модель) — для подбора «серой зоны» каскада
+	Label     bool    // мошеннический
 	Kind      synth.Kind
 	Class     protect.Class
 	Emergency bool
@@ -41,6 +45,7 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, samples []synth.Sample,
 		return nil, err
 	}
 	pol := eng.Policy()
+	stage1 := eng.Model()
 	rows := make([]Row, 0, len(samples))
 	var lastFan int64
 	for i := range samples {
@@ -55,10 +60,13 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, samples []synth.Sample,
 		if err != nil {
 			return nil, err
 		}
-		row := Row{Label: s.Fraud, Kind: s.Kind, Class: a.Class, Emergency: a.Emergency, Caller: s.Call.Caller}
+		row := Row{Label: s.Fraud, Kind: s.Kind, Class: a.Class, Emergency: a.Emergency, Caller: s.Call.Caller, TS: ts}
 		if !a.Emergency {
-			row.X = a.Vec.X
+			row.X, row.Raw = a.Vec.X, a.Vec.Raw
 			row.Signals = pol.StrongSignals(&a.Vec)
+			var ex scoring.Explanation
+			stage1.Score(&a.Vec, &ex)
+			row.Score1 = ex.Score
 		}
 		rows = append(rows, row)
 	}
