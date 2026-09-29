@@ -65,7 +65,7 @@ func TestReplayDeterministic(t *testing.T) {
 	plan := testPlan(t)
 	run := func() []Row {
 		ds := synth.Generate(synth.Config{Seed: 21, Plan: plan, Scale: 0.05, Days: 2})
-		rows, err := Replay(plan, nil, ds.Samples, 10*time.Minute)
+		rows, err := Replay(plan, nil, nil, ds.Samples, 10*time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -33,13 +33,15 @@ type Row struct {
 // Replay проигрывает вызовы по времени через новый движок и возвращает строки признаков.
 // Часы движка ведутся по времени вызовов (детерминированно); индекс вееров пересчитывается
 // каждые fanEvery модельного времени. Вызовы из samples изменяются (подставляются значения).
-func Replay(plan *numplan.Plan, cls *protect.Classifier, samples []synth.Sample, fanEvery time.Duration) ([]Row, error) {
+//
+// model — линейная модель стадии 1, по которой считаются Score1 и порог «сильных» сигналов; nil — экспертная.
+func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, samples []synth.Sample, fanEvery time.Duration) ([]Row, error) {
 	var clock atomic.Int64
 	if len(samples) > 0 {
 		clock.Store(samples[0].Call.StartedAt.Unix())
 	}
 	eng, err := engine.New(engine.Config{
-		Plan: plan, Classifier: cls, Now: func() time.Time { return time.Unix(clock.Load(), 0) },
+		Plan: plan, Classifier: cls, Model: model, Now: func() time.Time { return time.Unix(clock.Load(), 0) },
 	})
 	if err != nil {
 		return nil, err

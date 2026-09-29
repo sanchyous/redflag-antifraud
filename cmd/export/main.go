@@ -21,6 +21,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/mltrain"
 	"github.com/sanchyous/redflag-antifraud/internal/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/protect"
+	"github.com/sanchyous/redflag-antifraud/internal/scoring"
 	"github.com/sanchyous/redflag-antifraud/internal/synth"
 )
 
@@ -33,6 +34,7 @@ func main() {
 		days       = flag.Int("days", 3, "длина периода, суток")
 		input      = flag.String("input", "", "размеченная выгрузка вызовов (.csv/.jsonl) вместо синтетики; нужна колонка label")
 		allowFile  = flag.String("allowlist", "", "файл allowlist проверенных номеров (для -input)")
+		modelFile  = flag.String("model", "", "линейная модель стадии 1 (JSON) для колонки s1; пусто — экспертная")
 	)
 	flag.Parse()
 	if *numplanDir == "" {
@@ -45,9 +47,21 @@ func main() {
 	if err != nil {
 		log.Fatalf("numplan: %v", err)
 	}
+	var stage1 *scoring.Model
+	if *modelFile != "" {
+		mf, err := os.Open(*modelFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if stage1, err = scoring.Load(mf); err != nil {
+			log.Fatalf("model: %v", err)
+		}
+		_ = mf.Close()
+		log.Printf("стадия 1: модель %s (review=%.4f, block=%.4f)", stage1.Version, stage1.Review, stage1.Block)
+	}
 	counts := map[string]int{}
 	if *input != "" {
-		exportExternal(plan, *input, *allowFile, *out, counts)
+		exportExternal(plan, stage1, *input, *allowFile, *out, counts)
 		writeMeta(*out, plan, *seed, *scale, *days, counts, *input)
 		return
 	}
@@ -58,7 +72,7 @@ func main() {
 		for _, a := range ds.Allowlist {
 			cls.Add(a)
 		}
-		rows, err := mltrain.Replay(plan, cls, ds.Samples, 10*time.Minute)
+		rows, err := mltrain.Replay(plan, cls, stage1, ds.Samples, 10*time.Minute)
 		if err != nil {
 			log.Fatalf("%s: %v", name, err)
 		}
@@ -98,7 +112,7 @@ func writeMeta(out string, plan *numplan.Plan, seed uint64, scale float64, days 
 // exportExternal выгружает размеченные вызовы из файла организаторов. Разбиение — по номеру звонящего
 // (хэш), чтобы вызовы одного номера не попадали в разные наборы (иначе оценка завышена утечкой); каждый
 // набор проигрывается независимо, в порядке времени.
-func exportExternal(plan *numplan.Plan, input, allowFile, out string, counts map[string]int) {
+func exportExternal(plan *numplan.Plan, stage1 *scoring.Model, input, allowFile, out string, counts map[string]int) {
 	res, err := ingest.ReadFile(input)
 	if err != nil {
 		log.Fatalf("input: %v", err)
@@ -150,7 +164,7 @@ func exportExternal(plan *numplan.Plan, input, allowFile, out string, counts map
 			log.Fatalf("набор %s пуст: в файле слишком мало разных номеров или вызовов", name)
 		}
 		sort.SliceStable(samples, func(i, j int) bool { return samples[i].Call.StartedAt.Before(samples[j].Call.StartedAt) })
-		rows, err := mltrain.Replay(plan, cls, samples, 10*time.Minute)
+		rows, err := mltrain.Replay(plan, cls, stage1, samples, 10*time.Minute)
 		if err != nil {
 			log.Fatalf("%s: %v", name, err)
 		}

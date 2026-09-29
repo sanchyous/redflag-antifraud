@@ -3,6 +3,7 @@ package scoring
 import (
 	"bytes"
 	"math"
+	"os"
 	"strings"
 	"testing"
 
@@ -177,5 +178,45 @@ func BenchmarkScore(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		m.Score(&v, &ex)
+	}
+}
+
+// Контракт с Python: модель стадии 1, обученная в ml-service/training/stage1.py, должна читаться ядром.
+// Файл testdata/stage1_from_python.json — настоящий результат обучения (без метрик); при изменении формата
+// на любой из сторон этот тест упадёт.
+func TestLoadsStage1TrainedByPython(t *testing.T) {
+	f, err := os.Open("testdata/stage1_from_python.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	m, err := Load(f)
+	if err != nil {
+		t.Fatalf("ядро не читает модель из Python: %v", err)
+	}
+	if !strings.HasPrefix(m.Version, "stage1-") || m.Review <= 0 || m.Block < m.Review {
+		t.Fatalf("model header: %+v", m)
+	}
+	// смысловая проверка: у обученной модели монотонность знаков (рост признака не снижает риск)
+	for i, name := range features.Names {
+		w := m.W[i]
+		if name == "call_duration" {
+			if w > 0 {
+				t.Fatalf("call_duration must not raise risk, w=%v", w)
+			}
+			continue
+		}
+		if w < 0 {
+			t.Fatalf("%s has a negative weight %v: the explanation would contradict common sense", name, w)
+		}
+	}
+	// и модель применима: подозрительный вектор оценивается выше обычного
+	var ex Explanation
+	fv, tv := fraud(), typical()
+	m.Score(&fv, &ex)
+	high := ex.Score
+	m.Score(&tv, &ex)
+	if !(high > ex.Score*10) {
+		t.Fatalf("trained model must separate the patterns: fraud %v vs typical %v", high, ex.Score)
 	}
 }
