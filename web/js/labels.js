@@ -42,4 +42,7 @@ const SIGNALS = {
 };
 
 export const factorName = (f) => FACTORS[f] || f;
+
+/** Является ли причина жёстким правилом (а не вкладом признака модели). */
+export const isRule = (factor) => typeof factor === 'string' && factor.startsWith('rule_');
 export const signalName = (s) => SIGNALS[s] || s;

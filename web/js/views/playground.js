@@ -2,7 +2,7 @@
 // результат показан как в ТЗ: вызов → решение и факторы с вкладом.
 
 import { scoreCall } from '../api.js';
-import { factorName, signalName } from '../labels.js';
+import { factorName, isRule, signalName } from '../labels.js';
 import { DECISION_RU, fmt, h, toast, widget } from '../ui.js';
 
 const nowIso = () => {
@@ -104,7 +104,7 @@ export function verdictCard(r) {
       const up = x.contribution >= 0;
       return h('div', { style: 'margin:9px 0' },
         h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
-          h('span', {}, h('b', {}, factorName(x.factor)), h('span', { class: 'muted' }, ' — ' + x.text)),
+          h('span', {}, isRule(x.factor) ? h('b', {}, x.text) : [h('b', {}, factorName(x.factor)), h('span', { class: 'muted' }, ' — ' + x.text)]),
           h('span', { class: 'mono', style: `color:${up ? 'var(--high)' : 'var(--ok-dark)'}` }, x.contribution === 0 ? 'правило' : fmt.signed(x.contribution))),
         h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
           h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),

@@ -2,7 +2,7 @@
 // разбор: факторы с вкладом в решение (то самое «объяснение», которого требует ТЗ).
 
 import { getEvents } from '../api.js';
-import { factorName, signalName } from '../labels.js';
+import { factorName, isRule, signalName } from '../labels.js';
 import { fmt, h, openDrawer, sevBadge, widget } from '../ui.js';
 
 const STRONG = new Set(['spoof', 'unallocated_caller', 'fan']);
@@ -40,7 +40,7 @@ export function openEvent(e) {
     const up = r.contribution >= 0;
     return h('div', { style: 'margin:10px 0' },
       h('div', { style: 'display:flex;justify-content:space-between;gap:10px;font-size:13px' },
-        h('span', {}, h('b', {}, factorName(r.factor)), h('span', { class: 'muted' }, ' — ' + r.text)),
+        h('span', {}, isRule(r.factor) ? h('b', {}, r.text) : [h('b', {}, factorName(r.factor)), h('span', { class: 'muted' }, ' — ' + r.text)]),
         h('span', { class: 'mono', style: `color:${up ? 'var(--high)' : 'var(--ok-dark)'}` }, r.contribution === 0 ? 'правило' : fmt.signed(r.contribution))),
       h('div', { style: 'position:relative;height:10px;background:var(--panel-head);border:1px solid var(--line);border-radius:5px;margin-top:4px' },
         h('div', { style: 'position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)' }),
@@ -66,7 +66,7 @@ export function openEvent(e) {
 
 export async function render(root, ctx) {
   const filter = ctx.problemsFilter || '';
-  const data = await getEvents(200, filter);
+  const data = await getEvents(100, filter);
   const btn = (value, label) => h('button', {
     class: 'btn small' + (filter === value ? '' : ' ghost'), style: 'margin-right:6px',
     onclick: () => { ctx.problemsFilter = value; ctx.rerender(); },
