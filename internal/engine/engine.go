@@ -52,7 +52,10 @@ type Response struct {
 	Callee          Party            `json:"callee"`
 	SafeClass       string           `json:"safe_class,omitempty"`
 	BlockSuppressed bool             `json:"block_suppressed,omitempty"`
-	Duplicate       bool             `json:"duplicate,omitempty"`
+	// RuleFloor — модель не сочла вызов рискованным, но сработало жёсткое правило (подмена номера
+	// или нераспределённый CLI): вердикт поднят до review.
+	RuleFloor bool `json:"rule_floor,omitempty"`
+	Duplicate bool `json:"duplicate,omitempty"`
 	// Stage — какая стадия приняла решение: "linear" (ядро) или "ml" (ML-сервис).
 	Stage          string `json:"stage"`
 	ModelVersion   string `json:"model_version"`
@@ -88,6 +91,7 @@ type Metrics struct {
 	Allow, Review, Block, Duplicates, Errors, Emergency, Suppressed atomic.Uint64
 	// Каскад: вызовы в ML, сбои ML, вызовы, обойдённые открытым breaker'ом, решения стадии 2.
 	MLCalls, MLErrors, MLSkipped, MLDecisions atomic.Uint64
+	RuleFloors                                atomic.Uint64 // вердикт поднят до review жёстким правилом
 }
 
 // mlState — то, что ядро знает о ML-модели: политика и ворота, подобранные при обучении.
@@ -295,6 +299,7 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 	resp.Stage, resp.ModelVersion = stage, version
 	resp.Duplicate = a.Dup
 	resp.BlockSuppressed = d.BlockSuppressed
+	resp.RuleFloor = d.Floored
 	resp.SafeClass = a.Class.String()
 	resp.Signals = sig.Names()
 	switch {
@@ -304,6 +309,11 @@ func (e *Engine) Score(c *callrec.Call) (Response, error) {
 		resp.Reasons = explain.FromML(mlContribs, 0.05, 6, 2)
 	default:
 		resp.Reasons = explain.Reasons(&ex, 0.05, 6, 2)
+	}
+	if d.Floored {
+		// Вердикт дало правило, а не модель: причина должна быть названа первой и своими словами.
+		resp.Reasons = append([]explain.Reason{floorReason(sig)}, resp.Reasons...)
+		e.Metrics.RuleFloors.Add(1)
 	}
 	switch d.Verdict {
 	case decide.Block:
@@ -435,4 +445,14 @@ func (e *Engine) MLVersion() string {
 		return st.Version
 	}
 	return ""
+}
+
+// floorReason описывает жёсткое правило, поднявшее вердикт до review.
+func floorReason(sig decide.Signals) explain.Reason {
+	if sig&decide.SigSpoof != 0 {
+		return explain.Reason{Factor: "rule_spoof", Value: 1, Effect: "raises",
+			Text: "правило: российский номер при иностранном входе (подмена номера) — не ниже review независимо от модели"}
+	}
+	return explain.Reason{Factor: "rule_unallocated", Value: 1, Effect: "raises",
+		Text: "правило: номер вызывающего из нераспределённого диапазона — не ниже review независимо от модели"}
 }

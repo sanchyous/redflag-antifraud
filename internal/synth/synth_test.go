@@ -110,9 +110,8 @@ func TestStructure(t *testing.T) {
 			t.Errorf("no samples of kind %s", k)
 		}
 	}
-	share := float64(fraud) / float64(len(ds.Samples))
-	if share < 0.03 || share > 0.4 {
-		t.Fatalf("fraud share %.3f is out of the intended range", share)
+	if fraud == 0 || fraud == len(ds.Samples) {
+		t.Fatalf("both classes must be present, fraud=%d of %d", fraud, len(ds.Samples))
 	}
 	end := cfg.Start.Add(time.Duration(2*24+12) * time.Hour)
 	for _, s := range ds.Samples {
@@ -156,10 +155,10 @@ func TestFraudPatternsAreWhatTheyClaim(t *testing.T) {
 	if r := st[KindRegular]; float64(r.unanswered)/float64(r.calls) > 0.3 {
 		t.Fatalf("regular users answer most calls: %+v", r)
 	}
-	// трудные легитимные: роумеры приходят из-за рубежа под российским номером
+	// роумер входит в сеть как домашний абонент; иностранный вход — редкие легитимные SIP-транки
 	roam := st[KindRoamer]
-	if roam.foreign != roam.calls {
-		t.Fatalf("roamers must have foreign ingress: %+v", roam)
+	if roam.calls == 0 || float64(roam.foreign)/float64(roam.calls) > 0.5 {
+		t.Fatalf("roamers must mostly look domestic: %+v", roam)
 	}
 }
 
@@ -181,6 +180,31 @@ func TestSpoofBurstUnallocatedShare(t *testing.T) {
 	}
 	if unalloc == 0 || unalloc == len(callers) {
 		t.Fatalf("spoof callers should mix unallocated (%d) and real (%d total) numbers", unalloc, len(callers))
+	}
+}
+
+// На реальном масштабе обычные абоненты дают основную часть трафика, а мошенничество — заметную,
+// но меньшую долю: иначе метрики (в том числе FPR по трудным типам) не имеют смысла.
+func TestDefaultMixIsRealistic(t *testing.T) {
+	ds := Generate(Config{Seed: 3, Plan: testPlan(t), Days: 2})
+	counts := map[Kind]int{}
+	fraud := 0
+	for _, s := range ds.Samples {
+		counts[s.Kind]++
+		if s.Fraud {
+			fraud++
+		}
+	}
+	n := float64(len(ds.Samples))
+	if share := float64(counts[KindRegular]) / n; share < 0.5 {
+		t.Fatalf("ordinary subscribers must dominate traffic, got %.2f", share)
+	}
+	if share := float64(fraud) / n; share < 0.03 || share > 0.25 {
+		t.Fatalf("fraud share %.3f out of the intended range", share)
+	}
+	hard := counts[KindHeavy] + counts[KindCallCenter] + counts[KindBankNotify] + counts[KindCorpMulti]
+	if float64(hard)/n > 0.3 {
+		t.Fatalf("hard legit actors dominate traffic: %.2f", float64(hard)/n)
 	}
 }
 

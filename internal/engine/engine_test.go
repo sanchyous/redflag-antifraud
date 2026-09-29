@@ -335,8 +335,13 @@ func TestModelHotSwap(t *testing.T) {
 	if after.ModelVersion != "prior-x" || before.ModelVersion == after.ModelVersion {
 		t.Fatalf("model not swapped: %s → %s", before.ModelVersion, after.ModelVersion)
 	}
-	if after.Decision != "allow" {
-		t.Fatalf("thresholds from the new model must apply: %+v", after)
+	// Пороги новой модели строгие (0.9999), но подмена номера — жёсткое правило: пол review остаётся.
+	if after.Decision != "review" || !after.RuleFloor {
+		t.Fatalf("hard evidence must floor the verdict even with strict thresholds: %+v", after)
+	}
+	// а обычный вызов по новым порогам остаётся allow
+	if ord, _ := e.Score(call("m-3", "+7 916 123-45-67", "+7 495 765-43-21", t0, 200)); ord.Decision != "allow" {
+		t.Fatalf("ordinary call: %+v", ord)
 	}
 }
 

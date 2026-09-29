@@ -109,21 +109,23 @@ func (c *Config) defaults() {
 			*v = max(1, int(math.Round(float64(def)*c.Scale))) // каждый тип представлен хотя бы одним абонентом
 		}
 	}
+	// Пропорции подобраны так, чтобы обычные абоненты давали основную часть трафика (как в сети),
+	// а трудные легитимные случаи были представлены достаточно, чтобы считать по ним FPR отдельно.
 	set(&c.Regular, 6000)
-	set(&c.Heavy, 300)
-	set(&c.CallCenters, 25)
-	set(&c.BankNotify, 10)
-	set(&c.Couriers, 100)
-	set(&c.Roamers, 200)
+	set(&c.Heavy, 60)
+	set(&c.CallCenters, 6)
+	set(&c.BankNotify, 4)
+	set(&c.Couriers, 30)
+	set(&c.Roamers, 60)
 	set(&c.ForeignCallers, 100)
-	set(&c.CorpMulti, 6)
+	set(&c.CorpMulti, 3)
 	set(&c.Emergency, 150)
-	set(&c.SpoofBurst, 30)
-	set(&c.Robocall, 15)
-	set(&c.OneRing, 20)
-	set(&c.FanGroups, 8)
-	set(&c.SimFarms, 8)
-	set(&c.ColdSpam, 150)
+	set(&c.SpoofBurst, 12)
+	set(&c.Robocall, 6)
+	set(&c.OneRing, 8)
+	set(&c.FanGroups, 3)
+	set(&c.SimFarms, 4)
+	set(&c.ColdSpam, 60)
 }
 
 type gen struct {
@@ -441,15 +443,23 @@ func (g *gen) courier() {
 	}
 }
 
+// roamer — абонент за границей. Его вызов входит в сеть как домашний (через собственную сеть
+// оператора), а не через международный транзит, поэтому вход выглядит российским. Небольшая доля
+// таких абонентов — легитимные SIP-транки и облачные АТС российских компаний через зарубежных
+// операторов: российский номер при иностранном входе, но не подмена. Это единственный трудный
+// легитимный случай для признака spoof, и он нарочно редок.
 func (g *gen) roamer() {
 	region := g.anyRegion()
 	caller := g.number(region)
 	list := g.contacts(g.intn(4, 15), region, 0.8)
-	country := foreignCountries[g.rng.IntN(len(foreignCountries))].iso
+	connType, country := "mobile", "RU"
+	if g.chance(0.10) {
+		connType, country = "international", foreignCountries[g.rng.IntN(len(foreignCountries))].iso
+	}
 	for day := 0; day < g.cfg.Days; day++ {
 		n := g.intn(3, 8)
 		for i := 0; i < n; i++ {
-			c := callrec.Call{Caller: caller, Callee: g.pick(list), StartedAt: g.humanTime(day), ConnType: "international",
+			c := callrec.Call{Caller: caller, Callee: g.pick(list), StartedAt: g.humanTime(day), ConnType: connType,
 				SrcCountry: country, SrcOperator: g.operatorOf(caller)}
 			if g.chance(0.8) {
 				c.DurationSec = g.durAnswered(90, 0.9)

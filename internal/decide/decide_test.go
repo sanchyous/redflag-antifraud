@@ -32,6 +32,11 @@ func TestDecideTable(t *testing.T) {
 		{"service short не блокируется", protect.ServiceShort, 0.99, two, Review, true},
 		{"allowlisted с низким score", protect.Allowlisted, 0.01, 0, Allow, false},
 		{"экстренная служба всегда allow", protect.Emergency, 0.999, two | SigBurst, Allow, false},
+		{"подмена номера: модель молчит, но пол review", protect.None, 0.0001, SigSpoof, Review, false},
+		{"нераспределённый CLI: пол review", protect.None, 0.0001, SigUnallocated, Review, false},
+		{"объёмный сигнал не даёт пола", protect.None, 0.0001, SigBurst, Allow, false},
+		{"экстренная важнее пола", protect.Emergency, 0.0001, SigSpoof, Allow, false},
+		{"пол не превращается в block", protect.None, 0.5, SigSpoof, Review, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,6 +59,41 @@ func TestEmergencyNeverBlocked(t *testing.T) {
 		res := p.Decide(protect.Emergency, score, sig)
 		if res.Verdict != Allow {
 			t.Fatalf("emergency call got %v (policy=%+v score=%v sig=%b)", res.Verdict, p, score, sig)
+		}
+	}
+}
+
+func TestHardSignalFloor(t *testing.T) {
+	r := pol().Decide(protect.None, 0.0001, SigSpoof)
+	if r.Verdict != Review || !r.Floored {
+		t.Fatalf("floor: %+v", r)
+	}
+	// если модель и так отметила — пол не «сработал»
+	if r := pol().Decide(protect.None, 0.5, SigSpoof); r.Floored {
+		t.Fatalf("floor must not be reported when the model already flagged: %+v", r)
+	}
+	// защищённые классы тоже получают пол (review не блокирует), экстренные — нет
+	if r := pol().Decide(protect.Allowlisted, 0.0001, SigUnallocated); r.Verdict != Review {
+		t.Fatalf("allowlisted: %+v", r)
+	}
+	if r := pol().Decide(protect.Emergency, 0.0001, HardSignals); r.Verdict != Allow || r.Floored {
+		t.Fatalf("emergency: %+v", r)
+	}
+}
+
+// Значения битов сигналов — контракт с Python (HARD_SIGNALS_MASK). Менять порядок нельзя без правки там.
+func TestSignalBitsAreStableContract(t *testing.T) {
+	if SigSpoof != 1 || SigUnallocated != 2 || HardSignals != 3 {
+		t.Fatalf("signal bits changed: spoof=%d unallocated=%d hard=%d", SigSpoof, SigUnallocated, HardSignals)
+	}
+}
+
+func TestEmergencyNeverBlockedStillHoldsWithFloor(t *testing.T) {
+	r := rand.New(rand.NewPCG(9, 9))
+	for i := 0; i < 100_000; i++ {
+		res := pol().Decide(protect.Emergency, r.Float32(), Signals(r.Uint32()&0x7f)|HardSignals)
+		if res.Verdict != Allow {
+			t.Fatalf("emergency got %v", res.Verdict)
 		}
 	}
 }

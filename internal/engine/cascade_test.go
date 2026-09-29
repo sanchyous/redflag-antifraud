@@ -107,6 +107,34 @@ func TestCascadeUsesMLForGrayZone(t *testing.T) {
 	}
 }
 
+func TestMLCannotOverrideSpoofEvidence(t *testing.T) {
+	// Пример из ТЗ: ML на холодном вызове считает риск ничтожным, но подмена номера — прямое
+	// свидетельство, а не вероятность: пол review остаётся, причина названа правилом.
+	f := newFakeML(t)
+	f.score.Store(0.0002)
+	e, _ := newCascade(t, f, nil)
+	r, _ := e.Score(spoofCall("floor-1"))
+	if r.Stage != "ml" || r.Decision != "review" || !r.RuleFloor {
+		t.Fatalf("spoof evidence must floor the verdict at review: %+v", r)
+	}
+	if len(r.Reasons) == 0 || r.Reasons[0].Factor != "rule_spoof" || r.Reasons[0].Text == "" {
+		t.Fatalf("the rule must be the first named reason: %+v", r.Reasons)
+	}
+	if e.Metrics.RuleFloors.Load() != 1 {
+		t.Fatal("RuleFloors metric")
+	}
+}
+
+func TestFloorAppliesWithoutMLToo(t *testing.T) {
+	e, _ := newEngine(t, nil)
+	c := call("nofloor", "+7 495 123-45-67", "+7 916 123-45-67", t0, 6)
+	c.SrcCountry = "DE"
+	r, _ := e.Score(c)
+	if r.Decision != "review" {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestCascadeSkipsMLBelowGateWithoutSignals(t *testing.T) {
 	f := newFakeML(t)
 	e, _ := newCascade(t, f, nil)
@@ -122,9 +150,16 @@ func TestCascadeSkipsMLBelowGateWithoutSignals(t *testing.T) {
 func TestMLCanLowerFalsePositive(t *testing.T) {
 	f := newFakeML(t)
 	f.score.Store(0.01)
+	inf := f.info.Load().(mlclient.Info)
+	inf.Thresholds = map[string]float64{"review": 0.3, "block": 0.9, "gate": 0.001, "min_signals": 2}
+	f.info.Store(inf) // низкие ворота: подозрение стадии 1 (score ниже review) всё равно уходит в ML
 	e, _ := newCascade(t, f, nil)
-	r, _ := e.Score(spoofCall("fp-1"))
-	if r.Stage != "ml" || r.Decision != "allow" {
+	// Иностранный звонящий с иностранным номером: вход из-за рубежа, но это не подмена (жёсткого
+	// сигнала нет) — стадия 1 его подозревает, ML снимает подозрение.
+	c := call("fp-1", "+49 30 12345678", "+7 916 123-45-67", t0, 6)
+	c.SrcCountry = "DE"
+	r, _ := e.Score(c)
+	if r.Stage != "ml" || r.Decision != "allow" || r.RuleFloor {
 		t.Fatalf("ML says benign → allow: %+v", r)
 	}
 	if len(r.Reasons) != 0 {

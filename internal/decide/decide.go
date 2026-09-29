@@ -125,17 +125,27 @@ func (p Policy) StrongSignals(v *features.Vector) Signals {
 	return s
 }
 
+// HardSignals — сигналы-свидетельства: российский номер при иностранном входе (подмена) и номер из
+// нераспределённого диапазона. Это не статистика, а прямое доказательство подмены CLI, поэтому они
+// задают пол вердикта review независимо от модели. Значения битов — контракт с Python-сервисом
+// (ml-service/training/evaluate.py: HARD_SIGNALS_MASK).
+const HardSignals = SigSpoof | SigUnallocated
+
 // Result — итог решения.
 type Result struct {
 	Verdict Verdict
 	// BlockSuppressed — модель и сигналы требовали block, но защитный класс его запретил.
 	BlockSuppressed bool
+	// Floored — модель сказала allow, но сработало жёсткое правило: вердикт поднят до review.
+	Floored bool
 }
 
 // Decide выносит вердикт. Инварианты (проверяются тестами):
 //   - Emergency → всегда Allow, при любом score и сигналах;
 //   - защищённый класс (NeverBlock) → никогда Block;
-//   - Block только при score ≥ Block и не менее MinStrong сильных сигналов.
+//   - Block только при score ≥ Block и не менее MinStrong сильных сигналов;
+//   - жёсткий сигнал (HardSignals) → не ниже Review (модель не может его «отменить»); block из-за него
+//     сам по себе не наступает.
 func (p Policy) Decide(class protect.Class, score float32, sig Signals) Result {
 	if class == protect.Emergency {
 		return Result{Verdict: Allow}
@@ -149,6 +159,9 @@ func (p Policy) Decide(class protect.Class, score float32, sig Signals) Result {
 	}
 	if v == Block && class.NeverBlock() {
 		return Result{Verdict: Review, BlockSuppressed: true}
+	}
+	if v == Allow && sig&HardSignals != 0 {
+		return Result{Verdict: Review, Floored: true}
 	}
 	return Result{Verdict: v}
 }

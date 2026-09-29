@@ -44,6 +44,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	counter("redflag_duplicates_total", m.Duplicates.Load())
 	counter("redflag_errors_total", m.Errors.Load())
 	counter("redflag_score_panics_total", s.panics.Load())
+	counter("redflag_rule_floors_total", m.RuleFloors.Load())
 	counter("redflag_ml_calls_total", m.MLCalls.Load())
 	counter("redflag_ml_decisions_total", m.MLDecisions.Load())
 	counter("redflag_ml_errors_total", m.MLErrors.Load())
