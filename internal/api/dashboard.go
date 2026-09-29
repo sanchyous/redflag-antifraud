@@ -119,9 +119,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	st.Config.FailOpen, st.Config.Auth = s.FailOpen, s.APIKey != ""
 	m, tot := &s.Engine.Metrics, s.Tel.Totals()
-	st.Totals.Allow, st.Totals.Review, st.Totals.Block = m.Allow.Load(), m.Review.Load(), m.Block.Load()
+	st.Totals.Allow, st.Totals.Review, st.Totals.Block = tot.Allow, tot.Review, tot.Block // телеметрия переживает перезапуск, счётчики движка — нет
 	st.Totals.Linear, st.Totals.ML = tot.Linear, tot.ML
-	st.Totals.Emergency, st.Totals.Errors = m.Emergency.Load(), tot.Errors+m.Errors.Load()
+	st.Totals.Emergency, st.Totals.Errors = tot.Emergency, tot.Errors+m.Errors.Load()
 	st.Totals.Duplicates, st.Totals.RuleFloors = m.Duplicates.Load(), m.RuleFloors.Load()
 	st.Totals.MLCalls, st.Totals.MLErrors, st.Totals.MLSkipped = m.MLCalls.Load(), m.MLErrors.Load(), m.MLSkipped.Load()
 	writeJSON(w, http.StatusOK, st)
