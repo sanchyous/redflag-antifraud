@@ -56,6 +56,10 @@ cover: ## Покрытие тестами Go по пакетам
 bench: ## Бенчмарки горячего пути
 	go test -run xxx -bench . -benchmem ./internal/telecom/... ./internal/detection/... ./internal/decision/...
 
+.PHONY: loadtest
+loadtest: ## Нагрузочный тест: make loadtest URL=... [C=64 D=15s RPS=0]
+	go run ./cmd/loadtest -url $(URL) -c $(or $(C),64) -d $(or $(D),15s) -rps $(or $(RPS),0)
+
 .PHONY: check
 check: lint test ## Полная проверка перед коммитом (lint + test)
 

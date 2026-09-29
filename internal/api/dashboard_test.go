@@ -469,3 +469,36 @@ func TestRuleFloorVisibleInEventsAndLog(t *testing.T) {
 		t.Fatalf("rule floors total = %d", st.Totals.RuleFloors)
 	}
 }
+
+// benchBodies заранее готовит тела запросов: в горячем цикле бенчмарка нет ни форматирования, ни генерации.
+func benchBodies(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		if i%20 == 0 { // 5% подозрительных
+			out[i] = fmt.Sprintf(`{"call_id":"b%d","caller":"+7 495 %03d-%02d-%02d","callee":"+7 916 %03d-%02d-%02d","duration_sec":4,"src_country":"DE","conn_type":"international"}`,
+				i, i%1000, i%100, (i/7)%100, (i/3)%1000, i%100, i%97)
+		} else {
+			out[i] = fmt.Sprintf(`{"call_id":"b%d","caller":"+7 916 %03d-%02d-%02d","callee":"+7 495 %03d-%02d-%02d","duration_sec":%d}`,
+				i, i%1000, i%100, (i/7)%100, (i/3)%1000, i%100, i%97, 20+i%300)
+		}
+	}
+	return out
+}
+
+// BenchmarkHandleScore измеряет весь HTTP-обработчик (разбор запроса, скоринг, кодирование ответа, телеметрия) без сети.
+func BenchmarkHandleScore(b *testing.B) {
+	h := newServer(b, nil).Routes()
+	bodies := benchBodies(1 << 15)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		rec := httptest.NewRecorder()
+		for pb.Next() {
+			i++
+			req := httptest.NewRequest("POST", "/v1/calls/score", strings.NewReader(bodies[i&(1<<15-1)]))
+			rec.Body.Reset()
+			h.ServeHTTP(rec, req)
+		}
+	})
+}

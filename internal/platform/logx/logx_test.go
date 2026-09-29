@@ -32,9 +32,15 @@ func TestJSONFormatHasServiceVersionAndRequestID(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
 		t.Fatalf("not json: %q", buf.String())
 	}
-	if rec["msg"] != "decision" || rec["service"] != "decision-api" || rec["version"] != "1.2.3" ||
+	if rec["msg"] != "decision" || rec["service"] != "decision-api" || rec["build"] != "1.2.3" ||
 		rec["request_id"] != "req-42" || rec["call_id"] != "c-1" || rec["score"] != 0.15 {
 		t.Fatalf("record = %v", rec)
+	}
+	// событие со своим полем version (версия модели) не конфликтует с версией сборки
+	buf.Reset()
+	l.Info("ml_stage_ready", "version", "catboost-1")
+	if strings.Count(buf.String(), `"version"`) != 1 || !strings.Contains(buf.String(), `"build":"1.2.3"`) {
+		t.Fatalf("JSON keys must not repeat: %s", buf.String())
 	}
 	if RequestID(context.Background()) != "" || RequestID(ctx) != "req-42" {
 		t.Fatal("RequestID accessor")

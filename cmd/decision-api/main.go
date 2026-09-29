@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	_ "net/http/pprof" // профилирование включается только явно (PPROF_ADDR), см. startPprof
 	"os"
 	"os/signal"
 	"runtime"
@@ -50,6 +52,7 @@ func main() {
 	}
 
 	ctx := context.Background()
+	startPprof(cfg.PprofAddr, log)
 
 	// Справочник нумерации: явная ошибка конфигурации — fail-fast; не задан — работаем без регионов.
 	var plan *numplan.Plan
@@ -204,6 +207,25 @@ func main() {
 	log.Info("stopped", "uptime", time.Since(tel.Started()).Round(time.Second).String())
 }
 
+// startPprof поднимает отладочный сервер профилирования. Выключен по умолчанию; допустим только адрес loopback:
+// профили раскрывают внутренности процесса и не должны быть доступны из сети.
+func startPprof(addr string, log *slog.Logger) {
+	if addr == "" {
+		return
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || (host != "127.0.0.1" && host != "localhost" && host != "::1") {
+		log.Error("pprof_refused", "addr", addr, "reason", "PPROF_ADDR must be a loopback address such as 127.0.0.1:6060")
+		return
+	}
+	go func() {
+		log.Warn("pprof_enabled", "addr", addr)
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			log.Error("pprof_failed", "err", err.Error())
+		}
+	}()
+}
+
 func failMode(open bool) string {
 	if open {
 		return "open"
@@ -267,6 +289,7 @@ type config struct {
 	LogFormat            string
 	LogDecisions         string
 	LogRatePerSec        int
+	PprofAddr            string
 }
 
 func loadConfig() config {
@@ -298,6 +321,7 @@ func loadConfig() config {
 		LogFormat:            os.Getenv("LOG_FORMAT"), // пусто: pretty на терминале, json иначе
 		LogDecisions:         env("LOG_DECISIONS", "flagged"),
 		LogRatePerSec:        envInt("LOG_RATE_PER_SEC", 200),
+		PprofAddr:            os.Getenv("PPROF_ADDR"),
 	}
 }
 

@@ -2,13 +2,13 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sanchyous/redflag-antifraud/internal/platform/logx"
@@ -60,17 +60,26 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+var recPool = sync.Pool{New: func() any { return new(statusRecorder) }}
+
 // withLogging — access-лог каждого запроса: одна строка, все поля структурой.
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := recPool.Get().(*statusRecorder)
+		rec.ResponseWriter, rec.status = w, http.StatusOK
+		defer func() { rec.ResponseWriter = nil; recPool.Put(rec) }()
 		next.ServeHTTP(rec, r)
 		// Горячий путь скоринга при большом потоке не должен писать строку в лог на каждый
 		// успешный запрос: 2xx по /v1/calls/* идут на уровне debug, всё остальное — info.
 		lvl := slog.LevelInfo
 		if rec.status < 400 && strings.HasPrefix(r.URL.Path, "/v1/calls/score") {
 			lvl = slog.LevelDebug
+		}
+		// Уровень проверяется ДО сборки аргументов: упаковка полей и разбор адреса клиента стоят аллокаций,
+		// а отброшенная запись не должна тратить их на каждом запросе горячего пути.
+		if !s.Log.Enabled(r.Context(), lvl) {
+			return
 		}
 		s.Log.Log(r.Context(), lvl, "http_request",
 			"method", r.Method,
@@ -90,12 +99,17 @@ func remoteIP(r *http.Request) string {
 	return host
 }
 
+// newRequestID — 16 шестнадцатеричных знаков. Идентификатор нужен для сопоставления записей, а не для защиты,
+// поэтому берётся быстрый генератор (без системного вызова и лишних аллокаций).
 func newRequestID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return time.Now().Format("20060102150405")
+	const hexd = "0123456789abcdef"
+	v := rand.Uint64()
+	var b [16]byte
+	for i := 15; i >= 0; i-- {
+		b[i] = hexd[v&0xF]
+		v >>= 4
 	}
-	return hex.EncodeToString(b[:])
+	return string(b[:])
 }
 
 // protect включает проверку X-API-Key (constant-time), если ключ задан.

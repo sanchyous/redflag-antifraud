@@ -82,6 +82,9 @@ type Config struct {
 	// Log — логгер движка: события состояния (активация и отключение ML, обновление вееров, очистка).
 	// nil — без логирования.
 	Log *slog.Logger
+	// MLRetryEvery — как часто проверять ML-сервис, пока стадия 2 неактивна (по умолчанию 5 с): после
+	// перезапуска ядро стартует раньше ML и должно подхватить его сразу, а не через минуту.
+	MLRetryEvery time.Duration
 	// OnMLError вызывается при неудачном обновлении описания ML-модели (логирование).
 	OnMLError func(error)
 	// MaxFutureSkew — максимальный допустимый уход started_at вперёд относительно часов сервера;
@@ -392,17 +395,25 @@ func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 	}
 	const mlEvery = time.Minute
 	lastML := time.Now()
+	retry := e.cfg.MLRetryEvery
+	if retry <= 0 {
+		retry = 5 * time.Second
+	}
 	ft := time.NewTicker(fanEvery)
 	st := time.NewTicker(sweepEvery)
+	mt := time.NewTicker(retry)
 	defer ft.Stop()
 	defer st.Stop()
+	defer mt.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ft.C:
 			e.RefreshFan()
-			if e.cfg.ML != nil && time.Since(lastML) >= mlEvery {
+		case <-mt.C:
+			// Стадия неактивна — повторяем быстро; активна — перечитываем описание модели раз в минуту.
+			if e.cfg.ML != nil && (e.ml.Load() == nil || time.Since(lastML) >= mlEvery) {
 				lastML = time.Now()
 				if err := e.RefreshML(ctx); err != nil && e.cfg.OnMLError != nil {
 					e.cfg.OnMLError(err)

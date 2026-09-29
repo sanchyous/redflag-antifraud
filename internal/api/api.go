@@ -121,8 +121,7 @@ func (s *Server) record(ctx context.Context, resp *engine.Response) {
 func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 	reqID := requestIDFrom(r.Context())
 	var c callrec.Call
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+	if !decodeBody(w, r, maxBodyBytes, &c) {
 		s.badRequest(w, reqID, "invalid_json")
 		return
 	}
@@ -140,7 +139,7 @@ func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.record(r.Context(), &resp)
-	writeJSON(w, http.StatusOK, resp)
+	writeScore(w, http.StatusOK, &resp)
 }
 
 type batchRequest struct {
@@ -157,8 +156,7 @@ type batchItem struct {
 func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	reqID := requestIDFrom(r.Context())
 	var req batchRequest
-	r.Body = http.MaxBytesReader(w, r.Body, maxBatchBytes)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if !decodeBody(w, r, maxBatchBytes, &req) {
 		s.badRequest(w, reqID, "invalid_json")
 		return
 	}
@@ -189,7 +187,7 @@ func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		s.record(r.Context(), &resp)
 		items[i].Result = &resp
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": items})
+	writeBatch(w, items)
 }
 
 func (s *Server) handleRecent(w http.ResponseWriter, r *http.Request) {

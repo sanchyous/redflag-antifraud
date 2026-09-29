@@ -77,7 +77,8 @@ func New(cfg Config) *slog.Logger {
 			l = l.With("service", cfg.Service)
 		}
 		if cfg.Version != "" {
-			l = l.With("version", cfg.Version)
+			// ключ build, а не version: у событий про модели есть своё поле version, дубль ключа в JSON недопустим
+			l = l.With("build", cfg.Version)
 		}
 	}
 	return l

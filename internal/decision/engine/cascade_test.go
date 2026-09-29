@@ -23,6 +23,7 @@ type fakeML struct {
 	status   atomic.Int32
 	contribs atomic.Value // []mlclient.Contribution
 	info     atomic.Value // mlclient.Info
+	infoCode atomic.Int32 // код ответа /v1/model (0 → 200)
 }
 
 func newFakeML(t *testing.T) *fakeML {
@@ -40,6 +41,10 @@ func newFakeML(t *testing.T) *fakeML {
 	})
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/model", func(w http.ResponseWriter, r *http.Request) {
+		if c := int(f.infoCode.Load()); c != 0 {
+			w.WriteHeader(c)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(f.info.Load().(mlclient.Info))
 	})
 	mux.HandleFunc("POST /v1/score", func(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +299,33 @@ func TestRefreshMLTransientErrorKeepsState(t *testing.T) {
 	}
 	if e.MLVersion() != "cb-test" {
 		t.Fatal("a transient failure must not disable a previously validated ML stage")
+	}
+}
+
+// Ядро стартует раньше ML (типично после деплоя): стадия 2 должна подключиться сразу, как только ML поднимется.
+func TestMLStageRecoversQuicklyAfterLateStart(t *testing.T) {
+	f := newFakeML(t)
+	f.infoCode.Store(503) // ML ещё не готов
+	cl, err := mlclient.New(mlclient.Config{BaseURL: f.srv.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := newEngine(t, func(c *Config) { c.ML = cl; c.MLRetryEvery = 10 * time.Millisecond })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go e.Run(ctx, time.Hour, time.Hour)
+
+	time.Sleep(60 * time.Millisecond)
+	if e.MLVersion() != "" {
+		t.Fatal("ML is not ready yet, the stage must stay inactive")
+	}
+	f.infoCode.Store(0) // ML поднялся
+	deadline := time.Now().Add(2 * time.Second)
+	for e.MLVersion() == "" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if e.MLVersion() != "cb-test" {
+		t.Fatal("the stage must activate within moments of the ML service coming up, not after a minute")
 	}
 }
 
