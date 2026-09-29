@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/detection/graph"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/window"
+	"github.com/sanchyous/redflag-antifraud/internal/platform/logx"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/phone"
@@ -77,6 +79,9 @@ type Config struct {
 	Now     func() time.Time // источник времени (тесты)
 	// ML — клиент ML-сервиса (стадия 2 каскада). nil — только стадия 1.
 	ML *mlclient.Client
+	// Log — логгер движка: события состояния (активация и отключение ML, обновление вееров, очистка).
+	// nil — без логирования.
+	Log *slog.Logger
 	// OnMLError вызывается при неудачном обновлении описания ML-модели (логирование).
 	OnMLError func(error)
 	// MaxFutureSkew — максимальный допустимый уход started_at вперёд относительно часов сервера;
@@ -99,6 +104,7 @@ type mlState struct {
 	Policy  decide.Policy
 	Gate    float32
 	Version string
+	Info    mlclient.Info
 }
 
 // Engine безопасен для конкурентного использования.
@@ -114,6 +120,7 @@ type Engine struct {
 	ml     atomic.Pointer[mlState]
 	class  *protect.Classifier
 	now    func() time.Time
+	log    *slog.Logger
 
 	Metrics Metrics
 }
@@ -143,6 +150,7 @@ func New(cfg Config) (*Engine, error) {
 		subs:   graph.NewSubscribers(0),
 		class:  cfg.Classifier,
 		now:    cfg.Now,
+		log:    logx.Component(cfg.Log, "engine"),
 	}
 	e.SetModel(cfg.Model)
 	return e, nil
@@ -359,9 +367,18 @@ func maskRaw(raw string) string {
 
 // RefreshFan пересчитывает индекс вееров по снимку профилей окон.
 func (e *Engine) RefreshFan() *graph.Index {
+	start := time.Now()
 	profiles := e.win.Profiles(e.now().Unix(), e.cfg.FanSpan, e.cfg.Fan.MinCallsOrDefault())
 	ix := graph.Analyze(profiles, e.cfg.Fan)
+	prev := e.fan.Index()
 	e.fan.Store(ix)
+	// Изменение состава вееров — событие (info); неизменный индекс — только debug, чтобы не шуметь раз в 30 секунд.
+	lvl := slog.LevelDebug
+	if prev.Groups() != ix.Groups() || prev.Members() != ix.Members() {
+		lvl = slog.LevelInfo
+	}
+	e.log.Log(context.Background(), lvl, "fan_index_updated", "groups", ix.Groups(), "members", ix.Members(),
+		"profiles", len(profiles), "took", time.Since(start).Round(time.Microsecond).String())
 	return ix
 }
 
@@ -393,8 +410,8 @@ func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 			}
 		case <-st.C:
 			now := e.now().Unix()
-			e.win.Sweep(now)
-			e.dedupe.Sweep(now)
+			numbers, calls := e.win.Sweep(now), e.dedupe.Sweep(now)
+			e.log.Debug("state_swept", "numbers_removed", numbers, "call_ids_removed", calls, "numbers_tracked", e.win.Len())
 		}
 	}
 }
@@ -411,7 +428,9 @@ func (e *Engine) RefreshML(ctx context.Context) error {
 		return err // текущее состояние не трогаем: временный сбой не должен отключать ML
 	}
 	fail := func(err error) error {
-		e.ml.Store(nil)
+		if e.ml.Swap(nil) != nil {
+			e.log.Error("ml_stage_disabled", "reason", err.Error())
+		}
 		return err
 	}
 	if len(inf.Features) != features.N {
@@ -435,7 +454,13 @@ func (e *Engine) RefreshML(ctx context.Context) error {
 	base := e.policy.Load()
 	pol.BurstCalls1h, pol.BurstShare, pol.SweepRegions = base.BurstCalls1h, base.BurstShare, base.SweepRegions
 	pol.FarmNumbers, pol.RobotIndex, pol.RobotCalls1h = base.FarmNumbers, base.RobotIndex, base.RobotCalls1h
-	e.ml.Store(&mlState{Policy: pol.Defaults(), Gate: gate, Version: inf.Version})
+	prev := e.ml.Swap(&mlState{Policy: pol.Defaults(), Gate: gate, Version: inf.Version, Info: inf})
+	switch {
+	case prev == nil:
+		e.log.Info("ml_stage_ready", "version", inf.Version, "gate", gate, "review", review, "block", block)
+	case prev.Version != inf.Version:
+		e.log.Info("ml_model_changed", "from", prev.Version, "to", inf.Version, "gate", gate, "review", review, "block", block)
+	}
 	return nil
 }
 

@@ -6,16 +6,19 @@ import hmac
 import logging
 import os
 import threading
+import time
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .logs import event, setup_logging
 from .model import FeatureError, ModelBundle, ModelError
 
 log = logging.getLogger("ml-service")
 
 MAX_BATCH = 500
+SLOW_MS = 50.0  # запрос дольше этого порога пишется на уровне info: он рискует упереться в таймаут ядра
 
 
 class ScoreRequest(BaseModel):
@@ -66,13 +69,15 @@ class State:
         self.bundle: ModelBundle | None = None
         if model_dir:
             self.bundle = ModelBundle.load(model_dir)
+            _log_loaded("model_loaded", self.bundle)
 
     def reload(self) -> ModelBundle:
         if not self.model_dir:
             raise ModelError("MODEL_DIR не задан")
         nb = ModelBundle.load(self.model_dir)  # ошибка не портит текущую модель
         with self._lock:
-            self.bundle = nb
+            prev, self.bundle = self.bundle, nb
+        _log_loaded("model_reloaded", nb, previous=prev.version if prev else None)
         return nb
 
     def get(self) -> ModelBundle:
@@ -82,12 +87,58 @@ class State:
         return b
 
 
+def _log_loaded(name: str, b: ModelBundle, **extra) -> None:
+    th = b.thresholds
+    event(
+        log,
+        logging.INFO,
+        name,
+        version=b.version,
+        features=len(b.features),
+        review=round(th.review, 5),
+        block=round(th.block, 5),
+        gate=round(th.gate, 5),
+        **extra,
+    )
+
+
 def create_app(model_dir: str | None = None, api_key: str | None = None) -> FastAPI:
     model_dir = model_dir if model_dir is not None else os.environ.get("MODEL_DIR")
     api_key = api_key if api_key is not None else os.environ.get("API_KEY", "")
     state = State(model_dir)
     app = FastAPI(title="RedFlag ML service", version="1.0.0")
     app.state.model_state = state
+
+    @app.middleware("http")
+    async def access_log(request: Request, call_next):
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            event(log, logging.ERROR, "http_exception", method=request.method, path=request.url.path)
+            log.exception("unhandled error", extra={"fields": {"path": request.url.path}})
+            raise
+        took_ms = (time.perf_counter() - start) * 1000
+        # Успешные быстрые запросы — debug (поток ядра велик); ошибки и медленные — info/warning.
+        level = logging.DEBUG
+        if response.status_code >= 500:
+            level = logging.ERROR
+        elif response.status_code >= 400:
+            level = logging.WARNING
+        elif took_ms > SLOW_MS:
+            level = logging.INFO
+        if request.url.path != "/health":
+            event(
+                log,
+                level,
+                "http_request",
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                took_ms=round(took_ms, 2),
+                slow=took_ms > SLOW_MS,
+            )
+        return response
 
     def auth(x_api_key: Annotated[str | None, Header()] = None) -> None:
         if api_key and not hmac.compare_digest((x_api_key or "").encode(), api_key.encode()):
@@ -115,6 +166,7 @@ def create_app(model_dir: str | None = None, api_key: str | None = None) -> Fast
         try:
             r = b.score([req.features], explain=req.explain)[0]
         except FeatureError as e:
+            event(log, logging.WARNING, "feature_contract_violation", detail=str(e))
             raise HTTPException(status_code=422, detail=str(e)) from e
         return ScoreResponse(model_version=b.version, **_out(r).model_dump())
 
@@ -152,4 +204,5 @@ def _out(r) -> ScoreOut:
 
 def app_factory() -> FastAPI:
     """Точка входа для uvicorn: `uvicorn app.main:app_factory --factory`."""
+    setup_logging()
     return create_app()

@@ -199,3 +199,49 @@ func TestBucketLog2(t *testing.T) {
 		t.Fatalf("buckets: %d %d %d", bucketLog2(3), bucketLog2(90), bucketLog2(0))
 	}
 }
+
+func TestIndexListForVisualization(t *testing.T) {
+	var ps []window.Profile
+	for i := 0; i < 6; i++ { // группа из 6
+		ps = append(ps, fanMember(uint64(1000+i), uint64(i)*10_000, 30+i, 3, 20))
+	}
+	for i := 0; i < 4; i++ { // другая, поменьше, с другим шаблоном
+		ps = append(ps, fanMember(uint64(5000+i), 1_000_000+uint64(i)*10_000, 30, 90, 600))
+	}
+	ix := Analyze(ps, Config{})
+	list := ix.List()
+	if len(list) != 2 || list[0].Size != 6 || list[1].Size != 4 {
+		t.Fatalf("groups must be sorted by size: %+v", list)
+	}
+	g := list[0]
+	if g.ID != 1000 || g.Disjoint != 1 || len(g.Members) != 6 {
+		t.Fatalf("group = %+v", g)
+	}
+	if g.Members[0].Calls < g.Members[len(g.Members)-1].Calls {
+		t.Fatal("members are sorted by calls descending")
+	}
+	for _, m := range g.Members {
+		if len(m.PeersSample) != peerSample || m.PeerCount < 30 {
+			t.Fatalf("member sample: %+v", m)
+		}
+	}
+	var nilIx *Index
+	if nilIx.List() != nil {
+		t.Fatal("nil index has no groups")
+	}
+}
+
+func TestLargeGroupMembersAreBounded(t *testing.T) {
+	var ps []window.Profile
+	for i := 0; i < maxGroupMembers+20; i++ {
+		ps = append(ps, fanMember(uint64(100+i), uint64(i)*1000, 30, 3, 20))
+	}
+	ix := Analyze(ps, Config{})
+	g := ix.List()[0]
+	if g.Size != maxGroupMembers+20 || len(g.Members) != maxGroupMembers {
+		t.Fatalf("size=%d stored members=%d", g.Size, len(g.Members))
+	}
+	if _, ok := ix.Lookup(uint64(100 + maxGroupMembers + 10)); !ok {
+		t.Fatal("members beyond the visualization bound must still be found by Lookup")
+	}
+}

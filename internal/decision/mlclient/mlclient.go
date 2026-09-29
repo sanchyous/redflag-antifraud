@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -35,6 +36,7 @@ type Config struct {
 	BreakerCooldown time.Duration // сколько breaker остаётся открытым (по умолчанию 10 с)
 	HTTP            *http.Client  // nil — собственный клиент с пулом соединений
 	Now             func() time.Time
+	Log             *slog.Logger // nil — без логирования; логируются только переходы состояния breaker
 }
 
 // Contribution — вклад признака (SHAP) в лог-шансы.
@@ -70,6 +72,7 @@ type Info struct {
 	Version    string             `json:"version"`
 	Features   []string           `json:"features"`
 	Thresholds map[string]float64 `json:"thresholds"`
+	Metrics    map[string]float64 `json:"metrics,omitempty"` // метрики обучения (для панели)
 }
 
 // Client безопасен для конкурентного использования.
@@ -130,16 +133,34 @@ func (c *Client) allow() bool {
 func (c *Client) record(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	wasOpen := c.failures >= c.cfg.BreakerFailures
 	c.probing = false
 	if err == nil {
 		c.failures = 0
+		if wasOpen {
+			c.log().Info("ml_breaker_closed", "reason", "probe succeeded")
+		}
 		return
 	}
 	c.failures++
 	if c.failures >= c.cfg.BreakerFailures {
 		c.openedAt = c.cfg.Now()
+		if !wasOpen {
+			c.log().Warn("ml_breaker_opened", "failures", c.failures, "cooldown", c.cfg.BreakerCooldown.String(), "err", err.Error())
+		} else {
+			c.log().Debug("ml_breaker_probe_failed", "err", err.Error())
+		}
 	}
 }
+
+func (c *Client) log() *slog.Logger {
+	if c.cfg.Log == nil {
+		return discard
+	}
+	return c.cfg.Log
+}
+
+var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // Open сообщает, открыт ли breaker (для метрик).
 func (c *Client) Open() bool {

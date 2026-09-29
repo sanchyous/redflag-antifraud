@@ -7,6 +7,7 @@ package graph
 
 import (
 	"math"
+	"sort"
 	"sync/atomic"
 
 	"github.com/sanchyous/redflag-antifraud/internal/detection/window"
@@ -60,7 +61,38 @@ type FanInfo struct {
 
 // Index — результат анализа: номер → веер. Неизменяем после создания.
 type Index struct {
-	m map[uint64]FanInfo
+	m      map[uint64]FanInfo
+	groups []Group
+}
+
+const (
+	maxGroupMembers = 64 // сколько участников группы хранится для визуализации
+	peerSample      = 3  // сколько адресатов на участника хранится для визуализации
+)
+
+// Member — участник веера с выборкой адресатов (для визуализации графа).
+type Member struct {
+	Key         uint64
+	Calls       uint32
+	PeerCount   int
+	PeersSample []uint64
+}
+
+// Group — найденный веер: участники и показатели группы.
+type Group struct {
+	ID       uint64
+	Size     int
+	Disjoint float32
+	Calls    uint32
+	Members  []Member // не более maxGroupMembers, по убыванию числа вызовов
+}
+
+// List возвращает найденные веера, крупные первыми. Срез нельзя изменять.
+func (ix *Index) List() []Group {
+	if ix == nil {
+		return nil
+	}
+	return ix.groups
 }
 
 // Lookup ищет номер в индексе.
@@ -155,10 +187,29 @@ func Analyze(profiles []window.Profile, cfg Config) *Index {
 			continue
 		}
 		fi := FanInfo{GroupID: gid, Size: uint16(min(len(members), math.MaxUint16)), Disjoint: disjoint, Calls: calls}
-		for _, p := range members {
+		g := Group{ID: gid, Size: len(members), Disjoint: disjoint, Calls: calls}
+		sorted := append([]*window.Profile(nil), members...)
+		sort.Slice(sorted, func(i, j int) bool {
+			if sorted[i].Calls != sorted[j].Calls {
+				return sorted[i].Calls > sorted[j].Calls
+			}
+			return sorted[i].Key < sorted[j].Key
+		})
+		for i, p := range sorted {
 			ix.m[p.Key] = fi
+			if i < maxGroupMembers {
+				g.Members = append(g.Members, Member{Key: p.Key, Calls: p.Calls, PeerCount: len(p.Peers),
+					PeersSample: append([]uint64(nil), p.Peers[:min(len(p.Peers), peerSample)]...)})
+			}
 		}
+		ix.groups = append(ix.groups, g)
 	}
+	sort.Slice(ix.groups, func(i, j int) bool {
+		if ix.groups[i].Size != ix.groups[j].Size {
+			return ix.groups[i].Size > ix.groups[j].Size
+		}
+		return ix.groups[i].ID < ix.groups[j].ID
+	})
 	return ix
 }
 

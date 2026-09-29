@@ -1,11 +1,14 @@
 package mlclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -151,6 +154,41 @@ func TestBreakerOpensAndRecovers(t *testing.T) {
 	}
 	if c.Open() {
 		t.Fatal("successful probe must close the breaker")
+	}
+}
+
+func TestBreakerTransitionsAreLogged(t *testing.T) {
+	var healthy atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healthy.Load() {
+			w.WriteHeader(500)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(Result{Score: 0.7, ModelVersion: "m"})
+	}))
+	defer srv.Close()
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	now := time.Unix(1000, 0)
+	c, _ := New(Config{BaseURL: srv.URL, BreakerFailures: 2, BreakerCooldown: time.Second, Log: log, Now: func() time.Time { return now }})
+	c.Score(context.Background(), vec(), false)
+	if strings.Contains(buf.String(), "ml_breaker") {
+		t.Fatalf("a single failure must not log: %s", buf.String())
+	}
+	c.Score(context.Background(), vec(), false) // второй сбой: открыт
+	if strings.Count(buf.String(), `"msg":"ml_breaker_opened"`) != 1 || !strings.Contains(buf.String(), `"level":"WARN"`) {
+		t.Fatalf("opening must be logged once as a warning: %s", buf.String())
+	}
+	now = now.Add(2 * time.Second)
+	c.Score(context.Background(), vec(), false) // проба провалилась
+	if !strings.Contains(buf.String(), "ml_breaker_probe_failed") || strings.Count(buf.String(), "ml_breaker_opened") != 1 {
+		t.Fatalf("failed probe is debug, not another 'opened': %s", buf.String())
+	}
+	now = now.Add(2 * time.Second)
+	healthy.Store(true)
+	c.Score(context.Background(), vec(), false)
+	if !strings.Contains(buf.String(), `"msg":"ml_breaker_closed"`) {
+		t.Fatalf("closing must be logged: %s", buf.String())
 	}
 }
 
