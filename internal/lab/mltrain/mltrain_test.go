@@ -11,6 +11,7 @@ import (
 	"github.com/sanchyous/redflag-antifraud/internal/detection/features"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/lab/synth"
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 )
 
@@ -61,13 +62,48 @@ func TestExportCSV(t *testing.T) {
 	}
 }
 
+// TestReplaySkipsInvalidRowsInsteadOfAborting — внешние выгрузки (cmd/export -input) могут содержать
+// единичный мусор (здесь — номер с невыделенным кодом страны); одна плохая строка не должна ронять
+// обучение на остальных тысячах.
+func TestReplaySkipsInvalidRowsInsteadOfAborting(t *testing.T) {
+	plan := testPlan(t)
+	t0 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	good := func(id string, dt time.Duration) synth.Sample {
+		return synth.Sample{Call: callrec.Call{CallID: id, Caller: "+79001234567", Callee: "+79161234567",
+			StartedAt: t0.Add(dt), DurationSec: 5}}
+	}
+	samples := []synth.Sample{
+		good("ok-1", 0),
+		{Call: callrec.Call{CallID: "bad", Caller: "+79001234567", Callee: "+99999999999", StartedAt: t0.Add(time.Second)}}, // код страны 999 не существует
+		good("ok-2", 2*time.Second),
+	}
+	rows, skipped, err := Replay(plan, nil, nil, samples, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", skipped)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (bad row dropped, good ones kept)", len(rows))
+	}
+	for _, r := range rows {
+		if r.Caller != "+79001234567" {
+			t.Fatalf("unexpected row survived: %+v", r)
+		}
+	}
+}
+
 func TestReplayDeterministic(t *testing.T) {
 	plan := testPlan(t)
 	run := func() []Row {
 		ds := synth.Generate(synth.Config{Seed: 21, Plan: plan, Scale: 0.05, Days: 2})
-		rows, err := Replay(plan, nil, nil, ds.Samples, 10*time.Minute)
+		rows, skipped, err := Replay(plan, nil, nil, ds.Samples, 10*time.Minute)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if skipped != 0 {
+			t.Fatalf("synthetic data must never be skipped by the engine, got %d", skipped)
 		}
 		return rows
 	}

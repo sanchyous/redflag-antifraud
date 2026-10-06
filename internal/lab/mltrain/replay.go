@@ -36,7 +36,12 @@ type Row struct {
 // каждые fanEvery модельного времени. Вызовы из samples изменяются (подставляются значения).
 //
 // model — линейная модель стадии 1, по которой считаются Score1 и порог «сильных» сигналов; nil — экспертная.
-func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, samples []synth.Sample, fanEvery time.Duration) ([]Row, error) {
+//
+// Строки, не прошедшие валидацию движка (невалидный номер и т.п.), пропускаются, а не прерывают
+// весь прогон: на синтетике (internal/lab/synth) такого не бывает, но внешние выгрузки (cmd/export
+// -input) по своей природе могут содержать единичный мусор — одна плохая строка не должна ронять
+// обучение на остальных тысячах. Второе возвращаемое значение — число пропущенных строк.
+func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, samples []synth.Sample, fanEvery time.Duration) ([]Row, int, error) {
 	var clock atomic.Int64
 	if len(samples) > 0 {
 		clock.Store(samples[0].Call.StartedAt.Unix())
@@ -45,12 +50,13 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, s
 		Plan: plan, Classifier: cls, Model: model, Now: func() time.Time { return time.Unix(clock.Load(), 0) },
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	pol := eng.Policy()
 	stage1 := eng.Model()
 	rows := make([]Row, 0, len(samples))
 	var lastFan int64
+	var skipped int
 	for i := range samples {
 		s := &samples[i]
 		ts := s.Call.StartedAt.Unix()
@@ -61,7 +67,8 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, s
 		}
 		a, err := eng.Analyze(&s.Call)
 		if err != nil {
-			return nil, err
+			skipped++
+			continue
 		}
 		row := Row{Label: s.Fraud, Kind: s.Kind, Class: a.Class, Emergency: a.Emergency, Caller: s.Call.Caller, Callee: s.Call.Callee, TS: ts}
 		if !a.Emergency {
@@ -73,5 +80,5 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, s
 		}
 		rows = append(rows, row)
 	}
-	return rows, nil
+	return rows, skipped, nil
 }

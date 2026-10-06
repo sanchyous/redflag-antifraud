@@ -72,7 +72,7 @@ func main() {
 		for _, a := range ds.Allowlist {
 			cls.Add(a)
 		}
-		rows, err := mltrain.Replay(plan, cls, stage1, ds.Samples, 10*time.Minute)
+		rows, skipped, err := mltrain.Replay(plan, cls, stage1, ds.Samples, 10*time.Minute)
 		if err != nil {
 			log.Fatalf("%s: %v", name, err)
 		}
@@ -87,6 +87,9 @@ func main() {
 			log.Fatal(err)
 		}
 		counts[name] = len(rows)
+		if skipped > 0 {
+			log.Printf("%s: пропущено невалидных строк движком: %d (это синтетика — такого быть не должно, проверьте генератор)", name, skipped)
+		}
 		log.Printf("%s: %d вызовов (seed %d)", name, len(rows), s)
 	}
 	writeMeta(*out, plan, *seed, *scale, *days, counts, "")
@@ -164,7 +167,7 @@ func exportExternal(plan *numplan.Plan, stage1 *scoring.Model, input, allowFile,
 			log.Fatalf("набор %s пуст: в файле слишком мало разных номеров или вызовов", name)
 		}
 		sort.SliceStable(samples, func(i, j int) bool { return samples[i].Call.StartedAt.Before(samples[j].Call.StartedAt) })
-		rows, err := mltrain.Replay(plan, cls, stage1, samples, 10*time.Minute)
+		rows, skipped, err := mltrain.Replay(plan, cls, stage1, samples, 10*time.Minute)
 		if err != nil {
 			log.Fatalf("%s: %v", name, err)
 		}
@@ -185,6 +188,6 @@ func exportExternal(plan *numplan.Plan, stage1 *scoring.Model, input, allowFile,
 			}
 		}
 		counts[name] = len(rows)
-		log.Printf("%s: %d вызовов, мошеннических %d", name, len(rows), fraud)
+		log.Printf("%s: %d вызовов, мошеннических %d, пропущено невалидных строк движком %d", name, len(rows), fraud, skipped)
 	}
 }
