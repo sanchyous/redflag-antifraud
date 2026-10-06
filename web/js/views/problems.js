@@ -1,9 +1,10 @@
 // «Проблемы» — рискованные решения (проверка и блок), по аналогии с Problems в Zabbix. Клик по строке открывает
 // разбор: факторы с вкладом в решение (то самое «объяснение», которого требует ТЗ).
 
+import { openAct } from '../act.js';
 import { getEvents } from '../api.js';
 import { factorName, isRule, signalName } from '../labels.js';
-import { fmt, h, openDrawer, sevBadge, widget } from '../ui.js';
+import { fmt, h, openDrawer, sevBadge, toast, widget } from '../ui.js';
 
 const STRONG = new Set(['spoof', 'unallocated_caller', 'fan']);
 
@@ -60,7 +61,9 @@ export function openEvent(e) {
     e.rule_floor ? h('dd', {}, 'Поднято правилом: подмена номера — не ниже «проверки».') : null,
     e.block_suppressed ? h('dt', {}, 'Защита') : null,
     e.block_suppressed ? h('dd', {}, 'Блок заменён проверкой: защитный класс.') : null);
-  openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv, h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Факторы'),
+  openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv,
+    h('button', { class: 'btn ghost small', type: 'button', style: 'margin:10px 0', onclick: () => openAct(e).catch((err) => toast(err.message, true)) }, 'Сформировать акт для надзорного органа'),
+    h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Факторы'),
     h('div', { class: 'muted', style: 'font-size:12px' }, 'вправо — повышает риск, влево — снижает'), contrib));
 }
 

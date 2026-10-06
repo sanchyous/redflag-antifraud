@@ -1,6 +1,7 @@
 // «Проверка вызова» — интерактивный скоринг одного вызова. Готовые сценарии повторяют пример из ТЗ и ключевые случаи;
 // результат показан как в ТЗ: вызов → решение и факторы с вкладом.
 
+import { openAct } from '../act.js';
 import { scoreCall } from '../api.js';
 import { factorName, isRule, signalName } from '../labels.js';
 import { DECISION_RU, fmt, h, toast, widget } from '../ui.js';
@@ -91,6 +92,10 @@ export function verdictCard(r) {
       h('div', {}, h('div', { class: 'big' }, (DECISION_RU[r.decision] || r.decision).toUpperCase()),
         h('div', { class: 'muted' }, `score ${r.score.toFixed(4)} · ${r.stage === 'ml' ? 'ML' : 'линейная модель'} · ${fmt.us(r.latency_us)}`)),
       h('div', { class: 'scorebar', title: 'вероятность риска' }, h('i', { style: `width:${Math.min(100, Math.max(2, r.score * 100))}%` }))),
+    h('button', {
+      class: 'btn ghost small', type: 'button', style: 'margin-bottom:12px',
+      onclick: () => openAct(r).catch((e) => toast(e.message, true)),
+    }, 'Сформировать акт для надзорного органа'),
     r.summary ? h('p', { style: 'margin:0 0 10px;font-size:14px;line-height:1.45' }, r.summary) : null,
     h('div', { style: 'margin-bottom:8px' }, h('span', { class: 'mono' }, `${r.caller.masked || '(скрыт)'} → ${r.callee.masked || '?'}`)),
     h('div', { class: 'muted', style: 'margin-bottom:8px;font-size:13px' },
