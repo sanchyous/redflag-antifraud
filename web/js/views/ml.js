@@ -32,7 +32,7 @@ export async function render(root) {
     root.replaceChildren(...parts);
     return;
   }
-  parts.push(dataBanner(report), qualityRow(report), curves(report), confusions(report), kinds(report), tail(report, status));
+  parts.push(dataBanner(report), qualityRow(report), curves(report), confusions(report), kinds(report), graphSection(report), tail(report, status));
   root.replaceChildren(...parts);
 }
 
@@ -170,6 +170,38 @@ function kinds(r) {
   const det = widget('Обнаружение по типам мошенничества', hbars(fraud.map((x) => ({ name: x.k, label: kindName(x.k), value: x.review / x.n,
     text: `${pct(x.review / x.n)} · блок ${pct(x.block / x.n, 0)}`, color: C.ml })), { max: 1, valWidth: 130 }), { sub: 'доля «проверка» и «блок»' });
   return h('div', { class: 'grid cols-2', style: 'margin-top:14px' }, fp, det);
+}
+
+// ---- графовый анализ (NetworkX, ADR-0018): структура сети обучающего набора и сверка с онлайн-эвристикой Go ----
+
+function graphSection(r) {
+  const g = r.graph;
+  if (!g || !g.available) {
+    return widget('Графовый анализ связей (NetworkX)', h('div', { class: 'empty' }, (g && g.reason) || 'недоступен (старая модель без графового раздела — переобучите)'));
+  }
+  const s = g.summary, fv = g.fan_validation;
+  const summary = widget('Структура сети вызовов', h('dl', { class: 'kv' },
+    h('dt', {}, 'Вершин (номеров)'), h('dd', {}, fmt.int(s.nodes)),
+    h('dt', {}, 'Рёбер (вызовов)'), h('dd', {}, fmt.int(s.edges)),
+    h('dt', {}, 'Компонент связности'), h('dd', {}, fmt.int(s.components)),
+    h('dt', {}, 'Крупнейшая компонента'), h('dd', {}, `${fmt.int(s.largest_component)} номеров`),
+    h('dt', {}, 'Сообществ (modularity)'), h('dd', {}, s.communities != null ? `${fmt.int(s.communities)} (${fmt.num(s.modularity, 3)})` : '—'),
+    h('dt', {}, 'Степень среди вызывающих'), h('dd', {}, `медиана ${fmt.num(s.out_degree_p50, 1)}, p99 ${fmt.num(s.out_degree_p99, 1)}`)),
+  { sub: 'офлайн, весь набор обучения' });
+
+  let body = h('div', { class: 'empty' }, 'Нет данных для сверки (в наборе нет r_fan_member).');
+  if (fv && fv.available) {
+    body = h('div', {},
+      h('div', { class: 'grid cols-3' },
+        tile('Нашёл граф', fmt.int(fv.networkx_fans), 'независимый анализ, весь набор'),
+        tile('Нашёл Go', fmt.int(fv.go_fans), 'онлайн, скользящее окно'),
+        tile('Совпадение', fv.agreement_rate != null ? pct(fv.agreement_rate) : '—', `${fmt.int(fv.agree)} общих номеров`, fv.agreement_rate > 0.5 ? 'ok' : 'warn')),
+      h('div', { class: 'muted', style: 'font-size:12px;margin-top:10px' },
+        `только у Go: ${fmt.int(fv.only_go)} · только у графа (окно не уместило): ${fmt.int(fv.only_networkx)}` +
+        (fv.capped ? ` · кандидатов ограничено до ${fmt.int(fv.candidates)}` : '')));
+  }
+  const validation = widget('Сверка с онлайн-эвристикой Go', body, { sub: 'расхождение — честная граница окна, не ошибка' });
+  return h('div', { class: 'grid cols-2', style: 'margin-top:14px' }, summary, validation);
 }
 
 function tail(r, status) {
