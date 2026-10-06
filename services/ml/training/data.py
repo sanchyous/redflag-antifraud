@@ -26,7 +26,10 @@ def load_split(directory: str | Path, name: str, features: list[str]) -> pd.Data
     """Читает {name}.csv, проверяет колонки признаков. Экстренные вызовы остаются (для отчёта)."""
     p = Path(directory) / f"{name}.csv"
     try:
-        df = pd.read_csv(p, dtype={"caller": "string", "kind": "string"})
+        # callee присутствует в выгрузках начиная с ADR-0018 (граф связей, NetworkX); в dtype он указан
+        # всегда — pandas тихо игнорирует отсутствующий в CSV ключ, так что старые наборы без этой
+        # колонки читаются как прежде (graphfeat.analyze сам сообщит, что граф недоступен).
+        df = pd.read_csv(p, dtype={"caller": "string", "callee": "string", "kind": "string"})
     except (OSError, pd.errors.ParserError) as e:
         raise DatasetError(f"не удалось прочитать {p}: {e}") from e
     need = ["label", "kind", "class", "signals", "emergency", "caller", "ts", "s1"] + [f"r_{f}" for f in features]

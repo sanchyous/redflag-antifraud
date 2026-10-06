@@ -2,6 +2,7 @@ catboost>=1.2.5
 scikit-learn>=1.4
 pandas>=2.1
 numpy>=1.26
+networkx>=3.2
 fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2.6

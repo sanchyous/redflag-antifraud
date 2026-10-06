@@ -28,6 +28,7 @@ type Row struct {
 	Emergency bool
 	Signals   decide.Signals
 	Caller    string
+	Callee    string // получатель вызова: нужен для построения графа связей (ADR-0018)
 }
 
 // Replay проигрывает вызовы по времени через новый движок и возвращает строки признаков.
@@ -62,7 +63,7 @@ func Replay(plan *numplan.Plan, cls *protect.Classifier, model *scoring.Model, s
 		if err != nil {
 			return nil, err
 		}
-		row := Row{Label: s.Fraud, Kind: s.Kind, Class: a.Class, Emergency: a.Emergency, Caller: s.Call.Caller, TS: ts}
+		row := Row{Label: s.Fraud, Kind: s.Kind, Class: a.Class, Emergency: a.Emergency, Caller: s.Call.Caller, Callee: s.Call.Callee, TS: ts}
 		if !a.Emergency {
 			row.X, row.Raw = a.Vec.X, a.Vec.Raw
 			row.Signals = pol.StrongSignals(&a.Vec)

@@ -33,6 +33,7 @@ def write_report(
     n_train: int,
     n_calib: int,
     importances: dict[str, float],
+    graph: dict | None = None,
 ) -> None:
     th = meta["thresholds"]
     L: list[str] = []
@@ -142,6 +143,42 @@ def write_report(
         "(прошедшие до реакции вызовы — цена холодного старта)"
     )
     p("")
+    if graph and graph.get("available"):
+        s, fv = graph["summary"], graph["fan_validation"]
+        p("## Графовый анализ связей (NetworkX)")
+        p("")
+        p(
+            "Офлайн-анализ полного графа вызовов набора (NetworkX) — отдельно от боевой эвристики Go "
+            "(`internal/detection/graph/fan.go`), которая работает онлайн на скользящем окне. Нужен для "
+            "проверки, насколько онлайн-эвристика соответствует графовой структуре, которую она должна ловить."
+        )
+        p("")
+        p(f"- вершин (номеров): {s['nodes']}; рёбер (вызовов): {s['edges']}; компонент связности: {s['components']}")
+        p(
+            f"- крупнейшая компонента: {s['largest_component']} номеров; сообществ (greedy modularity): {s['communities']} (модулярность {s['modularity']})"
+        )
+        p(f"- исходящая степень среди вызывающих: медиана {s['out_degree_p50']:.1f}, p99 {s['out_degree_p99']:.1f}")
+        p("")
+        if fv.get("available"):
+            p(
+                f"Сверка с Go: независимый графовый анализ нашёл веера у {fv['networkx_fans']} номеров "
+                f"(кандидатов рассмотрено {fv.get('candidates', '?')}{', ограничено по размеру' if fv.get('capped') else ''}), "
+                f"боевая эвристика — у {fv['go_fans']}. Совпадение: {fv['agree']} "
+                f"({fv['agreement_rate']:.1%} от найденных графом)."
+                if fv.get("agreement_rate") is not None
+                else f"Сверка с Go: найдено {fv['networkx_fans']} (граф) vs {fv['go_fans']} (онлайн-эвристика)."
+            )
+            p(
+                f"Только у Go: {fv['only_go']} (эвристика срабатывает на паттерн, который графовый анализ строгим "
+                f"порогом не считает веером — возможно, ложные срабатывания стоит посмотреть отдельно); "
+                f"только у графа: {fv['only_networkx']} (веер есть в данных целиком, но не уместился в окно Go)."
+            )
+        p("")
+    elif graph:
+        p("## Графовый анализ связей (NetworkX)")
+        p("")
+        p(f"Недоступен: {graph.get('reason', 'нет данных')}.")
+        p("")
     p("## Важность признаков (CatBoost)")
     p("")
     p("| Признак | Важность |")

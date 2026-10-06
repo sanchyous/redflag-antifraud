@@ -101,6 +101,7 @@ def build(
     n_calib: int,
     importances: dict[str, float],
     stage1_review: float,
+    graph: dict | None = None,
 ) -> dict:
     body_mask = test_full["class"].to_numpy() != CLASS_EMERGENCY
     body = test_full[body_mask].reset_index(drop=True)
@@ -191,4 +192,5 @@ def build(
         },
         "by_kind": m_test["by_kind"],
         "importances": {k: round(float(v), 4) for k, v in sorted(importances.items(), key=lambda kv: -kv[1])},
+        "graph": graph or {"available": False, "reason": "не посчитан"},
     }

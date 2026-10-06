@@ -33,8 +33,8 @@ func testPlan(t testing.TB) *numplan.Plan {
 
 func TestExportCSV(t *testing.T) {
 	rows := []Row{
-		{Label: true, Kind: synth.KindSpoofBurst, Class: protect.None, Signals: decide.SigSpoof | decide.SigFan, Caller: "+79161234567", TS: 1700000000},
-		{Kind: synth.KindEmergency, Emergency: true, Class: protect.Emergency, Caller: "+79160000000", TS: 1700000001},
+		{Label: true, Kind: synth.KindSpoofBurst, Class: protect.None, Signals: decide.SigSpoof | decide.SigFan, Caller: "+79161234567", Callee: "+79169999999", TS: 1700000000},
+		{Kind: synth.KindEmergency, Emergency: true, Class: protect.Emergency, Caller: "+79160000000", Callee: "103", TS: 1700000001},
 	}
 	rows[0].Raw[features.OutCalls1h], rows[0].X[features.OutCalls1h] = 340, 5.83
 	var buf bytes.Buffer
@@ -46,12 +46,12 @@ func TestExportCSV(t *testing.T) {
 		t.Fatalf("lines = %d", len(lines))
 	}
 	header := strings.Split(lines[0], ",")
-	if len(header) != 8+2*features.N || header[0] != "label" || header[7] != "s1" || header[8] != "r_out_calls_1h" || header[8+features.N] != "x_out_calls_1h" {
+	if len(header) != 9+2*features.N || header[0] != "label" || header[6] != "callee" || header[8] != "s1" || header[9] != "r_out_calls_1h" || header[9+features.N] != "x_out_calls_1h" {
 		t.Fatalf("header = %v", header)
 	}
 	row := strings.Split(lines[1], ",")
-	if len(row) != len(header) || row[0] != "1" || row[1] != "spoof_burst" || row[3] != "5" || row[4] != "0" || row[8] != "340" {
-		t.Fatalf("row = %v", row[:9])
+	if len(row) != len(header) || row[0] != "1" || row[1] != "spoof_burst" || row[3] != "5" || row[4] != "0" || row[6] != "+79169999999" || row[9] != "340" {
+		t.Fatalf("row = %v", row[:10])
 	}
 	if strings.Split(lines[2], ",")[4] != "1" {
 		t.Fatal("emergency flag must be exported")

@@ -26,8 +26,18 @@ def test_training_artifacts_and_quality(trained):
 def test_report_content(trained):
     out, _ = trained
     text = (out / "report.md").read_text(encoding="utf-8")
-    for want in ("Экстренные службы", "call_center", "spoof_burst", "Важность признаков", "ROC-AUC"):
+    for want in (
+        "Экстренные службы",
+        "call_center",
+        "spoof_burst",
+        "Важность признаков",
+        "ROC-AUC",
+        "Графовый анализ связей",
+    ):
         assert want in text
+    meta = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert meta["graph"]["available"] is True
+    assert meta["graph"]["summary"]["nodes"] > 0
 
 
 def test_model_respects_monotone_constraints(trained):

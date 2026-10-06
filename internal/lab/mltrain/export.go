@@ -10,8 +10,10 @@ import (
 
 // ExportColumns возвращает заголовок CSV: служебные поля, затем r_<признак> (исходные значения)
 // и x_<признак> (вход линейной модели). Порядок и имена — контракт с Python-сервисом.
+// caller/callee — немаскированные идентификаторы строго для построения графа связей при обучении
+// (NetworkX, services/ml/training/graphfeat.py, ADR-0018); в модель не идут и наружу не публикуются.
 func ExportColumns() []string {
-	cols := []string{"label", "kind", "class", "signals", "emergency", "caller", "ts", "s1"}
+	cols := []string{"label", "kind", "class", "signals", "emergency", "caller", "callee", "ts", "s1"}
 	for _, n := range features.Names {
 		cols = append(cols, "r_"+n)
 	}
@@ -39,7 +41,7 @@ func ExportCSV(w io.Writer, rows []Row) error {
 	for i := range rows {
 		r := &rows[i]
 		rec = append(rec[:0], b2s(r.Label), string(r.Kind), strconv.Itoa(int(r.Class)),
-			strconv.Itoa(int(r.Signals)), b2s(r.Emergency), r.Caller, strconv.FormatInt(r.TS, 10), f32(r.Score1))
+			strconv.Itoa(int(r.Signals)), b2s(r.Emergency), r.Caller, r.Callee, strconv.FormatInt(r.TS, 10), f32(r.Score1))
 		for k := 0; k < features.N; k++ {
 			rec = append(rec, f32(r.Raw[k]))
 		}

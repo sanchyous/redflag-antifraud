@@ -98,6 +98,7 @@ def make_split(n: int, seed: int, fraud_share: float = 0.2, with_emergency: bool
             "signals": sig,
             "emergency": 0,
             "caller": f"c{seed}-{i // 8}",
+            "callee": f"d{seed}-{i % 50}",  # циклические адресаты: граф связный, без претензии на «веер»
             "ts": 1_800_000_000 + i * 30,
             "s1": float(min(1.0, 0.002 + 0.9 * fraud * r.random() + 0.02 * r.random())),
         }

@@ -21,6 +21,7 @@ from app.model import META_FILE, MODEL_FILE
 
 from . import data as D
 from . import evaluate as E
+from . import graphfeat as GF
 from .report import write_report
 from .reportdata import REPORT_FILE
 from .reportdata import build as build_report
@@ -117,6 +118,8 @@ def train(
     gate = E.fit_gate(calib, stage1_review, targets)
     m_test = E.evaluate(score(test_full), test_full, review, block, gate, targets.min_signals)
     m_test_flat = E.evaluate(score(test_full), test_full, review, block, gate, targets.min_signals, cascade=False)
+    # графовый анализ (NetworkX) — отдельно от каскада, считается один раз и идёт в оба отчёта
+    graph = GF.analyze(test_full[test_full["emergency"] == 0] if "emergency" in test_full.columns else test_full)
 
     version = "catboost-" + datetime.now(UTC).strftime("%Y%m%d-%H%M")
     metrics = {
@@ -160,6 +163,7 @@ def train(
                 n_calib=len(calib),
                 importances=importances,
                 stage1_review=stage1_review,
+                graph=graph,
             ),
             ensure_ascii=False,
             separators=(",", ":"),
@@ -176,6 +180,7 @@ def train(
             n_train=len(train_df),
             n_calib=len(calib),
             importances=importances,
+            graph=graph,
         )
     return {"meta": meta, "test": m_test}
 
