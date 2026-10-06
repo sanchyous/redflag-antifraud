@@ -48,6 +48,11 @@ func main() {
 		"ml", cfg.MLURL != "", "numplan", cfg.NumplanDir != "", "allowlist", cfg.AllowlistFile != "", "log_decisions", cfg.LogDecisions,
 		"window_max_events", cfg.WindowMaxEvents, "window_max_numbers", cfg.WindowMaxNumbers)
 	if cfg.APIKey == "" {
+		if cfg.RequireAPIKey {
+			log.Error("api_unprotected", "reason",
+				"REQUIRE_API_KEY=true, но API_KEY пуст: отказ запуска. Задайте API_KEY или уберите REQUIRE_API_KEY (dev-режим)")
+			os.Exit(1)
+		}
 		log.Warn("api_unprotected", "reason", "API_KEY is empty: anyone who can reach the port can call the API and read the dashboard data")
 	}
 
@@ -288,6 +293,7 @@ type config struct {
 	Addr                 string
 	DatabaseURL          string
 	APIKey               string
+	RequireAPIKey        bool
 	FailOpen             bool
 	NumplanDir           string
 	AllowlistFile        string
@@ -318,6 +324,10 @@ func loadConfig() config {
 		Addr:        env("ADDR", ":8000"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		APIKey:      os.Getenv("API_KEY"),
+		// REQUIRE_API_KEY=true: отказ запуска, если API_KEY пуст (прод по умолчанию небезопасен молча —
+		// это явный включаемый барьер, а не поведение по умолчанию, чтобы не сломать существующие
+		// dev/демо-окружения без API_KEY при обновлении).
+		RequireAPIKey: strings.EqualFold(os.Getenv("REQUIRE_API_KEY"), "true"),
 		// FAIL_MODE=closed: сбой скоринга эскалирует вердикт до review; иначе — open (allow).
 		FailOpen:      !strings.EqualFold(os.Getenv("FAIL_MODE"), "closed"),
 		NumplanDir:    os.Getenv("NUMPLAN_DIR"),

@@ -379,8 +379,24 @@ func TestPanicRecovery(t *testing.T) {
 
 func TestDocsAndSpec(t *testing.T) {
 	h := newServer(t, nil).Routes()
-	if rr := do(t, h, "GET", "/docs", ""); rr.Code != 200 || !strings.Contains(rr.Body.String(), "swagger") {
-		t.Fatalf("docs: %d", rr.Code)
+	if rr := do(t, h, "GET", "/docs", ""); rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("docs redirect: %d", rr.Code)
+	}
+	page := do(t, h, "GET", "/docs/", "")
+	if page.Code != 200 || !strings.Contains(page.Body.String(), "swagger") {
+		t.Fatalf("docs page: %d", page.Code)
+	}
+	// ассеты Swagger UI вкомпилированы (docsui), а не грузятся с CDN: страница должна работать без интернета
+	if strings.Contains(page.Body.String(), "unpkg.com") || strings.Contains(page.Body.String(), "http://") || strings.Contains(page.Body.String(), "https://") {
+		t.Fatalf("docs page references an external resource: %s", page.Body.String())
+	}
+	css := do(t, h, "GET", "/docs/swagger-ui.css", "")
+	if css.Code != 200 || css.Body.Len() == 0 {
+		t.Fatalf("docs css: %d", css.Code)
+	}
+	js := do(t, h, "GET", "/docs/swagger-ui-bundle.js", "")
+	if js.Code != 200 || js.Body.Len() == 0 {
+		t.Fatalf("docs js: %d", js.Code)
 	}
 	rr := do(t, h, "GET", "/openapi.yaml", "")
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "/v1/calls/score") {
