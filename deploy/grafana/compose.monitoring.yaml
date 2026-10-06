@@ -1,0 +1,42 @@
+# Необязательная надстройка: Prometheus + Grafana поверх основного compose.yaml.
+#
+#   docker compose -f compose.yaml -f deploy/grafana/compose.monitoring.yaml --profile monitoring up -d
+#
+# Datasource Prometheus провижинится автоматически (provisioning/datasources). Дашборд — один ручной
+# Import в UI Grafana (Dashboards → New → Import → загрузить redflag-dashboard.json): так дашборд
+# остаётся переносимым (можно импортировать в любой Grafana, в том числе не поднятый этим файлом) —
+# автопровижининг конкретно дашборда привязал бы его к фиксированному datasource UID.
+#
+# Работает и с VictoriaMetrics вместо Prometheus (PromQL-совместим, включая histogram_quantile) —
+# для этого в datasources/prometheus.yml поменять url на адрес VictoriaMetrics и/или заменить образ
+# prometheus на victoriametrics/victoria-metrics ниже.
+services:
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - "./deploy/grafana/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?задайте GRAFANA_ADMIN_PASSWORD в .env}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - "./deploy/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:

@@ -1,9 +1,23 @@
+# Ротация логов — одна на все сервисы (YAML-якорь): без неё json-file-драйвер Docker по умолчанию не
+# ограничен и за недели работы способен забить диск. Лимиты ресурсов — чтобы один контейнер (например,
+# ML при всплеске трафика) не положил машину целиком; если тесно — поднять numbers, не убирать секцию.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
     build: .
     restart: unless-stopped
     ports:
       - "8000:8000"
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1g }
+        reservations: { memory: 128m }
     environment:
       ADDR: ":8000"
       DATABASE_URL: "postgres://${POSTGRES_USER:-redflag}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-redflag}?sslmode=disable"
@@ -55,6 +69,11 @@ services:
     profiles: ["ml"]
     build: ./services/ml
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g }
+        reservations: { memory: 256m }
     environment:
       MODEL_DIR: "/models"
       API_KEY: "${ML_API_KEY:-}"
@@ -73,6 +92,11 @@ services:
     image: postgres:17-alpine
     container_name: redflag-postgres
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512m }
+        reservations: { memory: 64m }
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-redflag}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (создай .env по .env.example)}"

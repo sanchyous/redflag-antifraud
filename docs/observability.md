@@ -41,3 +41,16 @@
 `redflag_decisions_total{decision}`, `redflag_score_latency_seconds` (гистограмма), `redflag_ml_calls_total`, `redflag_ml_errors_total`,
 `redflag_ml_skipped_total` (breaker открыт), `redflag_rule_floors_total`, `redflag_emergency_total`, `redflag_duplicates_total`,
 `redflag_tracked_numbers`, `redflag_fan_groups`, `redflag_journal_*`.
+
+### Grafana
+
+`deploy/grafana/redflag-dashboard.json` — готовый дашборд (решения по времени, p50/p95/p99, ML-каскад,
+журнал, окна/веера, ошибки и паники). Поднять Prometheus + Grafana поверх основного стенда:
+
+```bash
+docker compose -f compose.yaml -f deploy/grafana/compose.monitoring.yaml --profile monitoring up -d
+```
+
+Datasource Prometheus провижинится автоматически; дашборд — один Import в UI Grafana (Dashboards → New →
+Import → загрузить JSON). Совместимо и с VictoriaMetrics вместо Prometheus (PromQL, включая
+`histogram_quantile`) — см. комментарий в `compose.monitoring.yaml`.

@@ -1,0 +1,152 @@
+{
+  "title": "RedFlag Antifraud",
+  "uid": "redflag-antifraud",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Обзор", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+    {
+      "id": 1, "type": "stat", "title": "Запросов/с",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(rate(redflag_decisions_total[5m]))", "legendFormat": "rps" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 } }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Доля review",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(rate(redflag_decisions_total{decision=\"review\"}[5m])) / sum(rate(redflag_decisions_total[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.2 }
+      ] } } }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Доля block",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(rate(redflag_decisions_total{decision=\"block\"}[5m])) / sum(rate(redflag_decisions_total[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 0.001 }, { "color": "red", "value": 0.01 }
+      ] } } }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Экстренных вызовов/ч",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "rate(redflag_emergency_total[1h]) * 3600" }],
+      "description": "Экстренные (112/101/102/103/104) всегда allow архитектурно — отдельного счётчика «заблокировано» нет и не может быть по построению (internal/detection/protect, decide.Decide). Эта плитка — просто объём, подтверждающий, что защитный путь реально проходит трафик, а не только существует в тестах.",
+      "fieldConfig": { "defaults": { "decimals": 0 } }
+    },
+
+    { "id": 101, "type": "row", "title": "Решения", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+    {
+      "id": 10, "type": "timeseries", "title": "Решения по времени",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum(rate(redflag_decisions_total{decision=\"allow\"}[1m]))", "legendFormat": "allow" },
+        { "expr": "sum(rate(redflag_decisions_total{decision=\"review\"}[1m]))", "legendFormat": "review" },
+        { "expr": "sum(rate(redflag_decisions_total{decision=\"block\"}[1m]))", "legendFormat": "block" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 }, "unit": "reqps" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "allow" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "review" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "block" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ] }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Сигналы: пол-правило, подавленный block, дубликаты",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(redflag_rule_floors_total[5m])", "legendFormat": "rule_floor" },
+        { "expr": "rate(redflag_block_suppressed_total[5m])", "legendFormat": "block_suppressed" },
+        { "expr": "rate(redflag_duplicates_total[5m])", "legendFormat": "duplicates" }
+      ]
+    },
+
+    { "id": 102, "type": "row", "title": "Задержка скоринга", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 } },
+    {
+      "id": 20, "type": "timeseries", "title": "p50 / p95 / p99",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(redflag_score_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(redflag_score_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(redflag_score_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+
+    { "id": 103, "type": "row", "title": "ML-каскад (стадия 2)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 } },
+    {
+      "id": 30, "type": "timeseries", "title": "Вызовы / ошибки / пропуски (breaker открыт)",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(redflag_ml_calls_total[5m])", "legendFormat": "calls" },
+        { "expr": "rate(redflag_ml_errors_total[5m])", "legendFormat": "errors" },
+        { "expr": "rate(redflag_ml_skipped_total[5m])", "legendFormat": "skipped (breaker open)" }
+      ]
+    },
+    {
+      "id": 31, "type": "stat", "title": "Доля трафика в ML",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(rate(redflag_ml_decisions_total[5m])) / sum(rate(redflag_decisions_total[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    },
+
+    { "id": 104, "type": "row", "title": "Журнал, окна, граф связей", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 } },
+    {
+      "id": 40, "type": "timeseries", "title": "Журнал: записано / потеряно / ошибок",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(redflag_journal_written_total[5m])", "legendFormat": "written" },
+        { "expr": "rate(redflag_journal_dropped_total[5m])", "legendFormat": "dropped" },
+        { "expr": "rate(redflag_journal_failed_total[5m])", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "id": 41, "type": "timeseries", "title": "Номеров в окнах / вееров / номеров в веерах",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "redflag_tracked_numbers", "legendFormat": "tracked_numbers" },
+        { "expr": "redflag_fan_groups", "legendFormat": "fan_groups" },
+        { "expr": "redflag_fan_members", "legendFormat": "fan_members" }
+      ]
+    },
+
+    { "id": 105, "type": "row", "title": "Аномалии", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 } },
+    {
+      "id": 50, "type": "timeseries", "title": "Ошибки скоринга и паники (должно быть ~0)",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 42 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(redflag_errors_total[5m])", "legendFormat": "errors (контракт)" },
+        { "expr": "rate(redflag_score_panics_total[5m])", "legendFormat": "panics" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "thresholdsStyle": { "mode": "line" } },
+        "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.001 }] } } }
+    }
+  ]
+}

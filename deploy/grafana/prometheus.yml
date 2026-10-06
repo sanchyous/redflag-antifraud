@@ -1,0 +1,5 @@
+scrape_configs:
+  - job_name: redflag-antifraud
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["app:8000"]
