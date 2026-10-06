@@ -115,7 +115,6 @@ func main() {
 	w := csv.NewWriter(of)
 	_ = w.Write([]string{"call_id", "caller", "callee", "started_at", "decision", "score", "stage", "signals", "safe_class", "rule_floor", "top_reasons", "label"})
 
-	type conf struct{ tp, fp, fn, tn int }
 	var review, block conf
 	emerg, emergBlocked, errCount := 0, 0, 0
 	hasLabel := false
@@ -157,20 +156,8 @@ func main() {
 			continue
 		}
 		if rc.Label != nil {
-			tally := func(c *conf, flagged bool) {
-				switch {
-				case *rc.Label && flagged:
-					c.tp++
-				case *rc.Label:
-					c.fn++
-				case flagged:
-					c.fp++
-				default:
-					c.tn++
-				}
-			}
-			tally(&review, resp.Decision != "allow")
-			tally(&block, resp.Decision == "block")
+			review.tally(*rc.Label, resp.Decision != "allow")
+			block.tally(*rc.Label, resp.Decision == "block")
 		}
 	}
 	w.Flush()
@@ -182,17 +169,47 @@ func main() {
 	log.Printf("обработано %d вызовов за %s (%.0f вызовов/с), ошибок валидации %d, результат: %s",
 		len(recs)-errCount, took.Round(time.Millisecond), float64(len(recs))/took.Seconds(), errCount, *out)
 	if hasLabel {
-		pct := func(a, b int) float64 {
-			if b == 0 {
-				return 0
-			}
-			return 100 * float64(a) / float64(b)
-		}
 		fmt.Printf("\nСводка по размеченным вызовам (без экстренных):\n")
 		fmt.Printf("  review или выше: полнота %.1f%%, ложных срабатываний %.3f%% (%d из %d легитимных)\n",
-			pct(review.tp, review.tp+review.fn), pct(review.fp, review.fp+review.tn), review.fp, review.fp+review.tn)
+			review.recall()*100, review.fpr()*100, review.fp, review.fp+review.tn)
 		fmt.Printf("  block:           полнота %.1f%%, ложных блокировок %.4f%% (%d из %d легитимных)\n",
-			pct(block.tp, block.tp+block.fn), pct(block.fp, block.fp+block.tn), block.fp, block.fp+block.tn)
+			block.recall()*100, block.fpr()*100, block.fp, block.fp+block.tn)
 		fmt.Printf("  экстренные: %d, заблокировано %d\n", emerg, emergBlocked)
 	}
+}
+
+// conf — матрица ошибок (мошеннический/легитимный × отмечен/не отмечен). Вынесена из main для
+// юнит-тестов: ошибка в подсчёте recall/FPR здесь означала бы, что жюри на защите увидит неверную
+// долю ложных срабатываний — именно тот показатель, на который в ТЗ явный акцент.
+type conf struct{ tp, fp, fn, tn int }
+
+// tally добавляет один размеченный вызов: label — мошеннический; flagged — вызов отмечен решением
+// (review или выше — для review; block — для block).
+func (c *conf) tally(label, flagged bool) {
+	switch {
+	case label && flagged:
+		c.tp++
+	case label:
+		c.fn++
+	case flagged:
+		c.fp++
+	default:
+		c.tn++
+	}
+}
+
+// recall — полнота: доля пойманных мошеннических среди всех мошеннических.
+func (c conf) recall() float64 {
+	if c.tp+c.fn == 0 {
+		return 0
+	}
+	return float64(c.tp) / float64(c.tp+c.fn)
+}
+
+// fpr — доля ложных срабатываний среди легитимных.
+func (c conf) fpr() float64 {
+	if c.fp+c.tn == 0 {
+		return 0
+	}
+	return float64(c.fp) / float64(c.fp+c.tn)
 }
