@@ -117,3 +117,23 @@ export function hbars(items, { color = 'var(--accent)', max, valWidth } = {}) {
     h('div', { class: 'track' }, h('div', { class: 'fill', style: `width:${Math.max(2, (i.value / top) * 100)}%;background:${i.color || color}` })),
     h('div', { class: 'val' }, i.text ?? fmt.int(i.value)))));
 }
+
+// ---- рябь (ripple) Material при нажатии ----
+// Один делегированный обработчик на документе: не требует правок в местах создания кнопок/строк.
+// prefers-reduced-motion учтён в CSS (@keyframes длительность сведена к 1мс), здесь ничего решать не нужно.
+const RIPPLE_SEL = '.btn, .icon-btn, .nav-item, .range button, .chip, tr.row';
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== undefined && e.button !== 0) return; // только основная кнопка/тач
+  const el = e.target.closest(RIPPLE_SEL);
+  if (!el || el.disabled) return;
+  el.classList.add('ripple-host');
+  const rect = el.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 1.8;
+  const span = document.createElement('span');
+  span.className = 'ripple';
+  span.style.width = span.style.height = size + 'px';
+  span.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  span.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  el.appendChild(span);
+  span.addEventListener('animationend', () => span.remove());
+});

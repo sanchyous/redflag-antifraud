@@ -48,7 +48,7 @@ function buildNav() {
       group = r.group;
       nav.append(h('div', { class: 'nav-group' }, group));
     }
-    nav.append(h('a', { class: 'nav-item', href: '#/' + r.path, 'data-path': r.path, onclick: () => $('sidebar').classList.remove('open') },
+    nav.append(h('a', { class: 'nav-item', href: '#/' + r.path, 'data-path': r.path, onclick: () => { $('sidebar').classList.remove('open'); $('scrim').classList.remove('show'); } },
       icon(r.icon), h('span', {}, r.title), r.badge ? h('span', { class: 'badge', id: 'nav-badge', hidden: true }, '0') : null));
   }
 }
@@ -128,7 +128,8 @@ function init() {
   buildRange();
   $('auto').addEventListener('change', schedule);
   $('key-btn').addEventListener('click', () => { if (askKey()) render(true); });
-  $('menu-btn').addEventListener('click', () => $('sidebar').classList.toggle('open'));
+  $('menu-btn').addEventListener('click', () => { $('sidebar').classList.toggle('open'); $('scrim').classList.toggle('show'); });
+  $('scrim').addEventListener('click', () => { $('sidebar').classList.remove('open'); $('scrim').classList.remove('show'); });
   window.addEventListener('hashchange', () => render(true));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) render(true); });
   schedule();
