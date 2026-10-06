@@ -40,10 +40,13 @@ type Server struct {
 	// "all" (и allow на уровне debug) или "off".
 	LogDecisions string
 	Tel          *telemetry.Recorder // nil — создаётся при первом вызове Routes
+	// RateLimitRPS — предел запросов в секунду на скоринг (по ключу API или IP); 0 — выключено.
+	RateLimitRPS int
 
 	mlReport mlReportCache
 	lat      latencyHist
 	panics   atomic.Uint64
+	limiter  *RateLimiter
 }
 
 // Routes собирает маршруты с middleware.
@@ -51,13 +54,16 @@ func (s *Server) Routes() http.Handler {
 	if s.Tel == nil {
 		s.Tel = telemetry.New(nil)
 	}
+	if s.limiter == nil {
+		s.limiter = NewRateLimiter(s.RateLimitRPS)
+	}
 	mux := http.NewServeMux()
 	s.mountUI(mux)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mountDocs(mux)
-	mux.Handle("POST /v1/calls/score", s.protect(http.HandlerFunc(s.handleScore)))
-	mux.Handle("POST /v1/calls/score/batch", s.protect(http.HandlerFunc(s.handleBatch)))
+	mux.Handle("POST /v1/calls/score", s.protect(s.rateLimit(http.HandlerFunc(s.handleScore))))
+	mux.Handle("POST /v1/calls/score/batch", s.protect(s.rateLimit(http.HandlerFunc(s.handleBatch))))
 	mux.Handle("GET /v1/calls/recent", s.protect(http.HandlerFunc(s.handleRecent)))
 	mux.Handle("GET /v1/status", s.protect(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("GET /v1/stats", s.protect(http.HandlerFunc(s.handleStats)))

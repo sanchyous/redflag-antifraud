@@ -83,8 +83,9 @@ type statusResponse struct {
 		Enabled bool `json:"enabled"`
 	} `json:"store"`
 	Config struct {
-		FailOpen bool `json:"fail_open"`
-		Auth     bool `json:"auth"`
+		FailOpen  bool `json:"fail_open"`
+		Auth      bool `json:"auth"`
+		RateLimit int  `json:"rate_limit_rps,omitempty"` // 0 — выключен
 	} `json:"config"`
 	Totals struct {
 		Allow      uint64 `json:"allow"`
@@ -120,7 +121,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		st.Journal.Enabled = true
 		st.Journal.Written, st.Journal.Dropped, st.Journal.Failed = s.Journal.Written.Load(), s.Journal.Dropped.Load(), s.Journal.Failed.Load()
 	}
-	st.Config.FailOpen, st.Config.Auth = s.FailOpen, s.APIKey != ""
+	st.Config.FailOpen, st.Config.Auth, st.Config.RateLimit = s.FailOpen, s.APIKey != "", s.RateLimitRPS
 	m, tot := &s.Engine.Metrics, s.Tel.Totals()
 	st.Totals.Allow, st.Totals.Review, st.Totals.Block = tot.Allow, tot.Review, tot.Block // телеметрия переживает перезапуск, счётчики движка — нет
 	st.Totals.Linear, st.Totals.ML = tot.Linear, tot.ML

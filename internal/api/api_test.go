@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -374,6 +375,40 @@ func TestPanicRecovery(t *testing.T) {
 	resp = decode[engine.Response](t, do(t, s.Routes(), "POST", "/v1/calls/score", `{"callee":"103"}`))
 	if resp.Decision != "allow" || resp.SafeClass != "emergency" {
 		t.Fatalf("emergency during outage: %+v", resp)
+	}
+}
+
+func TestRateLimitRejectsOverLimit(t *testing.T) {
+	s := newServer(t, func(s *Server) { s.RateLimitRPS = 2 })
+	h := s.Routes()
+	body := `{"call_id":"r1","callee":"+7 916 123-45-67"}`
+	for i := 0; i < 2; i++ {
+		if rr := do(t, h, "POST", "/v1/calls/score", `{"call_id":"r0-`+strconv.Itoa(i)+`","callee":"+7 916 123-45-67"}`); rr.Code != 200 {
+			t.Fatalf("call %d: expected 200, got %d: %s", i, rr.Code, rr.Body.String())
+		}
+	}
+	rr := do(t, h, "POST", "/v1/calls/score", body)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("3rd call should be rate-limited, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header")
+	}
+	// другой ключ не должен делить бюджет
+	rr2 := do(t, h, "POST", "/v1/calls/score", `{"call_id":"other","callee":"+7 916 123-45-67"}`, "X-API-Key", "someone-else")
+	if rr2.Code == http.StatusTooManyRequests {
+		t.Fatal("a different X-API-Key must have its own budget")
+	}
+}
+
+func TestRateLimitDisabledByDefault(t *testing.T) {
+	s := newServer(t, nil)
+	h := s.Routes()
+	for i := 0; i < 20; i++ {
+		rr := do(t, h, "POST", "/v1/calls/score", `{"call_id":"d`+strconv.Itoa(i)+`","callee":"+7 916 123-45-67"}`)
+		if rr.Code == http.StatusTooManyRequests {
+			t.Fatal("rate limiting must be off unless RateLimitRPS is set")
+		}
 	}
 }
 

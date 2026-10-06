@@ -46,7 +46,7 @@ func main() {
 	log.Info("starting", "addr", cfg.Addr, "go", runtime.Version(), "cpus", runtime.NumCPU(), "gomaxprocs", runtime.GOMAXPROCS(0))
 	log.Info("config", "fail_mode", failMode(cfg.FailOpen), "auth", cfg.APIKey != "", "database", cfg.DatabaseURL != "",
 		"ml", cfg.MLURL != "", "numplan", cfg.NumplanDir != "", "allowlist", cfg.AllowlistFile != "", "log_decisions", cfg.LogDecisions,
-		"window_max_events", cfg.WindowMaxEvents, "window_max_numbers", cfg.WindowMaxNumbers)
+		"window_max_events", cfg.WindowMaxEvents, "window_max_numbers", cfg.WindowMaxNumbers, "rate_limit_rps", cfg.RateLimitRPS)
 	if cfg.APIKey == "" {
 		if cfg.RequireAPIKey {
 			log.Error("api_unprotected", "reason",
@@ -181,6 +181,7 @@ func main() {
 	srv := &api.Server{
 		Engine: eng, Journal: jr, Store: st, APIKey: cfg.APIKey, FailOpen: cfg.FailOpen,
 		Log: logx.Component(logger, "api"), Version: version, LogDecisions: cfg.LogDecisions, Tel: tel,
+		RateLimitRPS: cfg.RateLimitRPS,
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
@@ -301,6 +302,7 @@ type config struct {
 	ReviewThreshold      float64
 	BlockThreshold       float64
 	MinStrong            int
+	RateLimitRPS         int
 	WindowMaxEvents      int
 	WindowMaxNumbers     int
 	ShortCallSec         int
@@ -334,9 +336,11 @@ func loadConfig() config {
 		AllowlistFile: os.Getenv("ALLOWLIST_FILE"),
 		ModelFile:     os.Getenv("MODEL_FILE"),
 		// 0 — взять порог из файла модели.
-		ReviewThreshold:      envFloat("REVIEW_THRESHOLD", 0),
-		BlockThreshold:       envFloat("BLOCK_THRESHOLD", 0),
-		MinStrong:            envInt("BLOCK_MIN_SIGNALS", 2),
+		ReviewThreshold: envFloat("REVIEW_THRESHOLD", 0),
+		BlockThreshold:  envFloat("BLOCK_THRESHOLD", 0),
+		MinStrong:       envInt("BLOCK_MIN_SIGNALS", 2),
+		// 0 — выключено. Ключ ограничения — X-API-Key при включённом auth, иначе IP.
+		RateLimitRPS:         envInt("RATE_LIMIT_RPS", 0),
 		WindowMaxEvents:      envInt("WINDOW_MAX_EVENTS", 512),
 		WindowMaxNumbers:     envInt("WINDOW_MAX_NUMBERS", 4_000_000),
 		ShortCallSec:         envInt("SHORT_CALL_SEC", 10),

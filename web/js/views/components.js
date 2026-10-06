@@ -24,6 +24,8 @@ export function componentStatuses(s) {
   out.push({ name: 'Граф связей', state: 'ok', info: `${fmt.int(e.fan.groups)} вееров · ${fmt.int(e.fan.members)} номеров` });
   out.push({ name: 'Защитный слой', state: 'ok', info: `экстренных: ${fmt.int(s.totals.emergency)} · allowlist: ${fmt.int(e.protect.allowlist)}` });
   out.push({ name: 'Доступ к API', state: s.config.auth ? 'ok' : 'warn', info: s.config.auth ? 'ключ X-API-Key включён' : 'ключ не задан — API открыт' });
+  out.push({ name: 'Ограничение частоты', state: s.config.rate_limit_rps ? 'ok' : 'warn',
+    info: s.config.rate_limit_rps ? `${s.config.rate_limit_rps} запросов/с на ключ` : 'выключено' });
   return out;
 }
 
