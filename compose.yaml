@@ -1,6 +1,9 @@
 # Ротация логов — одна на все сервисы (YAML-якорь): без неё json-file-драйвер Docker по умолчанию не
 # ограничен и за недели работы способен забить диск. Лимиты ресурсов — чтобы один контейнер (например,
 # ML при всплеске трафика) не положил машину целиком; если тесно — поднять numbers, не убирать секцию.
+# Подобраны с запасом (боевой стенд — ВМ ~6 ГБ): нет собственной телеметрии потребления под реальной
+# нагрузкой, поэтому лучше избыточный потолок, чем риск OOM-kill в разгар защиты — это не тонкая
+# настройка под эффективность, а страховка от утечки/аномалии.
 x-logging: &default-logging
   driver: json-file
   options:
@@ -16,7 +19,7 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "2", memory: 1g }
+        limits: { cpus: "2", memory: 2g }
         reservations: { memory: 128m }
     environment:
       ADDR: ":8000"
@@ -72,7 +75,7 @@ services:
     logging: *default-logging
     deploy:
       resources:
-        limits: { cpus: "2", memory: 2g }
+        limits: { cpus: "2", memory: 1500m }
         reservations: { memory: 256m }
     environment:
       MODEL_DIR: "/models"
