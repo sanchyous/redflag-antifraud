@@ -6,11 +6,47 @@ jobs:
   debug:
     runs-on: [self-hosted, redflag]
     steps:
-      - name: Locate deploy env and config dir
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Regenerate stage1.json from the expert prior (new features added, old trained model incompatible)
         run: |
-          echo "=== app container inspect (env) ==="
-          docker inspect redflag-antifraud-app-1 --format '{{json .Config.Env}}'
-          echo "=== app container inspect (mounts) ==="
-          docker inspect redflag-antifraud-app-1 --format '{{json .Mounts}}'
-          echo "=== compose project dirs ==="
-          find /home -maxdepth 5 \( -iname "compose.yaml" -o -iname ".env" \) 2>/dev/null
+          set -e
+          CFG=/home/deploy/redflag/config
+          if [ -f "$CFG/stage1.json" ]; then
+            cp "$CFG/stage1.json" "$CFG/stage1.json.stale-$(date +%s)"
+            echo "backed up stale model"
+          fi
+          cat > /tmp/writemodel.go <<'EOF'
+          package main
+
+          import (
+          	"os"
+
+          	"github.com/sanchyous/redflag-antifraud/internal/decision/scoring"
+          )
+
+          func main() {
+          	f, err := os.Create(os.Args[1])
+          	if err != nil {
+          		panic(err)
+          	}
+          	defer f.Close()
+          	if err := scoring.Prior().Write(f, nil); err != nil {
+          		panic(err)
+          	}
+          }
+          EOF
+          go run /tmp/writemodel.go "$CFG/stage1.json"
+          cat "$CFG/stage1.json" | head -5
+          echo "=== restart app to pick it up ==="
+          docker restart redflag-antifraud-app-1
+          sleep 3
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo OK; exit 0; fi
+            sleep 2
+          done
+          echo "still unhealthy" >&2
+          docker logs --tail=60 redflag-antifraud-app-1
+          exit 1
