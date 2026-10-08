@@ -52,6 +52,18 @@ components:
         subscriber_id:
           type: string
           description: "Идентификатор абонента у оператора (для признака числа номеров на абонента)."
+        imsi:
+          type: string
+          description: "IMSI вызывающего из сигнализации. Несколько разных IMSI на одном номере — признак клона SIM."
+          example: "250012345678901"
+        direction:
+          type: string
+          enum: [incoming, outgoing, forwarded]
+          description: "Роль записи с точки зрения коммутатора; пусто — считается исходящим от caller. forwarded требует forward_to."
+        forward_to:
+          type: string
+          description: "Куда callee переадресовал вызов (только при direction=forwarded)."
+          example: "+7 916 ***-**-55"
     Reason:
       type: object
       properties:

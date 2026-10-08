@@ -206,6 +206,18 @@ func TestModelAndFansEndpoints(t *testing.T) {
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"groups":[]`) {
 		t.Fatalf("no fans → empty list: %d %s", rr.Code, rr.Body)
 	}
+	rr = do(t, h, "GET", "/v1/graph/chains", "")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"chains":[]`) {
+		t.Fatalf("no chains → empty list: %d %s", rr.Code, rr.Body)
+	}
+	rr = do(t, h, "GET", "/v1/graph/simbox", "")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"members":[]`) {
+		t.Fatalf("no sim-box → empty list: %d %s", rr.Code, rr.Body)
+	}
+	rr = do(t, h, "GET", "/v1/graph/carousel", "")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"groups":[]`) {
+		t.Fatalf("no carousel → empty list: %d %s", rr.Code, rr.Body)
+	}
 }
 
 func TestValidationErrorsAreCounted(t *testing.T) {

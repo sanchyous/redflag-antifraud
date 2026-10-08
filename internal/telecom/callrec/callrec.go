@@ -99,9 +99,10 @@ type Call struct {
 	// IMSI — идентификатор SIM вызывающего из сигнализации. Один номер с россыпью разных IMSI —
 	// признак клонирования SIM/подмены модуля идентификации (детектор: internal/detection/graph.Idents).
 	IMSI string `json:"imsi,omitempty"`
-	// Direction — входящий/исходящий/переадресация с точки зрения коммутатора; пусто — неизвестно
-	// (считается исходящим от Caller). ForwardTo обязателен при Direction == DirForwarded.
-	Direction Direction `json:"direction,omitempty"`
+	// Direction — incoming|outgoing|forwarded с точки зрения коммутатора; пусто — неизвестно
+	// (считается исходящим от Caller), как ConnType — строкой через API, разбирается ParseDirection.
+	// ForwardTo обязателен, если Direction == "forwarded".
+	Direction string `json:"direction,omitempty"`
 	// ForwardTo — куда Callee переадресовал вызов (при Direction == DirForwarded).
 	ForwardTo string `json:"forward_to,omitempty"`
 }
@@ -142,10 +143,11 @@ func (c *Call) Validate(now time.Time, maxFuture time.Duration) []string {
 	if c.SrcCountry != "" && len(c.SrcCountry) != 2 {
 		errs = append(errs, "src_country_invalid")
 	}
-	if c.Direction > DirForwarded {
+	dir, ok := ParseDirection(c.Direction)
+	if !ok {
 		errs = append(errs, "direction_invalid")
 	}
-	if c.Direction == DirForwarded && strings.TrimSpace(c.ForwardTo) == "" {
+	if dir == DirForwarded && strings.TrimSpace(c.ForwardTo) == "" {
 		errs = append(errs, "forward_to_required")
 	}
 	return errs

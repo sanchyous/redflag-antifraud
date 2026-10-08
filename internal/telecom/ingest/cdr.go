@@ -179,7 +179,7 @@ func ReadCDR(r io.Reader) (*Result, error) {
 		default: // исходящий и переадресация: звонил A
 			c.Caller, c.Callee = cdrDialable(a), cdrDialable(b)
 		}
-		c.Direction = dir
+		c.Direction = dir.String()
 		if dir == callrec.DirForwarded {
 			if len(parts) > 6 {
 				if cn, ok := normCDRNumber(parts[6]); ok {

@@ -152,3 +152,22 @@ func TestCarouselHolderNilIsSafe(t *testing.T) {
 		t.Fatal("empty holder must report not-found")
 	}
 }
+
+func TestAnalyzeCarouselListGroupsBySize(t *testing.T) {
+	keys := []uint64{10, 11, 12, 13, 14}
+	var ps []window.Profile
+	for _, k := range keys {
+		var peers []uint64
+		for _, o := range keys {
+			if o != k {
+				peers = append(peers, o)
+			}
+		}
+		ps = append(ps, carouselMember(k, 150, peers))
+	}
+	ix := AnalyzeCarousel(ps, CarouselConfig{})
+	list := ix.List()
+	if len(list) != 1 || len(list[0].Members) != 5 {
+		t.Fatalf("list = %+v", list)
+	}
+}

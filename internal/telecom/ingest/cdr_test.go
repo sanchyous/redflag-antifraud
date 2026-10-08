@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/phone"
 )
 
@@ -23,19 +22,19 @@ func TestReadCDRBasicTypes(t *testing.T) {
 
 	out := res.Records[0].Call
 	if CDRBareNumber(out.Caller) != "8109392353" || CDRBareNumber(out.Callee) != "2001413931" ||
-		out.Direction != callrec.DirOutgoing || out.IMSI == "" {
+		out.Direction != "outgoing" || out.IMSI == "" {
 		t.Fatalf("outgoing: %+v", out)
 	}
 
 	in := res.Records[1].Call
 	if CDRBareNumber(in.Caller) != "8994988642" || CDRBareNumber(in.Callee) != "8927842361" ||
-		in.Direction != callrec.DirIncoming {
+		in.Direction != "incoming" {
 		t.Fatalf("incoming must swap caller/callee (B actually dialed A): %+v", in)
 	}
 
 	fwd := res.Records[2].Call
 	if CDRBareNumber(fwd.Caller) != "0278765243" || CDRBareNumber(fwd.Callee) != "2107897245" ||
-		CDRBareNumber(fwd.ForwardTo) != "0255113701" || fwd.Direction != callrec.DirForwarded {
+		CDRBareNumber(fwd.ForwardTo) != "0255113701" || fwd.Direction != "forwarded" {
 		t.Fatalf("forwarded: %+v", fwd)
 	}
 	want := time.Date(2026, 10, 1, 0, 0, 10, 0, Loc)

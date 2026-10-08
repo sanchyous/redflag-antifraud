@@ -146,7 +146,7 @@ func (e *Enricher) Enrich(c *callrec.Call) (Result, error) {
 		dur = 0
 	}
 	var forwardTo uint64
-	if c.Direction == callrec.DirForwarded {
+	if dir, _ := callrec.ParseDirection(c.Direction); dir == callrec.DirForwarded {
 		if fn, err := phone.Parse(c.ForwardTo); err == nil {
 			forwardTo = fn.Key()
 		}

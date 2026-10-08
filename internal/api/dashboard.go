@@ -245,6 +245,18 @@ func (s *Server) handleFans(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"groups": s.Engine.FanGroups()})
 }
 
+func (s *Server) handleChains(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"chains": s.Engine.ChainViews()})
+}
+
+func (s *Server) handleSimBox(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"members": s.Engine.SimBoxMembers()})
+}
+
+func (s *Server) handleCarousel(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"groups": s.Engine.CarouselGroups()})
+}
+
 // uiHandler отдаёт встроенную панель. Файлы небольшие и вкомпилированы в бинарь, поэтому кэш отключён
 // (после деплоя пользователь сразу видит новую версию). Заголовки закрывают типовые векторы: внешние ресурсы
 // запрещены (панель работает в закрытом контуре), встраивание во фреймы запрещено.

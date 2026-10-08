@@ -340,10 +340,10 @@ func TestForwardChainSignal(t *testing.T) {
 	// B → C → D: два перехода переадресации, статично повторяются несколько раз.
 	for k := 0; k < 3; k++ {
 		b2c := call(fmt.Sprintf("fwd-bc-%d", k), "+7 916 000-00-01", "+7 916 000-00-02", clk.Now(), 10)
-		b2c.Direction, b2c.ForwardTo = callrec.DirForwarded, "+7 916 000-00-03"
+		b2c.Direction, b2c.ForwardTo = "forwarded", "+7 916 000-00-03"
 		e.Score(b2c)
 		c2d := call(fmt.Sprintf("fwd-cd-%d", k), "+7 916 222-00-01", "+7 916 000-00-03", clk.Now(), 10)
-		c2d.Direction, c2d.ForwardTo = callrec.DirForwarded, "+7 916 000-00-04"
+		c2d.Direction, c2d.ForwardTo = "forwarded", "+7 916 000-00-04"
 		e.Score(c2d)
 		clk.Advance(60)
 	}

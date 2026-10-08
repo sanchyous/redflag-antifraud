@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"sort"
 	"sync/atomic"
 
 	"github.com/sanchyous/redflag-antifraud/internal/detection/window"
@@ -67,6 +68,31 @@ func (ix *CarouselIndex) Lookup(key uint64) (CarouselInfo, bool) {
 	}
 	ci, ok := ix.m[key]
 	return ci, ok
+}
+
+// CarouselGroup — закрытая группа номеров для панели.
+type CarouselGroup struct {
+	ID      uint64
+	Members []uint64
+}
+
+// List возвращает найденные группы, крупные первыми. Аллоцирует на каждый вызов — не горячий
+// путь (панель мониторинга).
+func (ix *CarouselIndex) List() []CarouselGroup {
+	if ix == nil {
+		return nil
+	}
+	byGroup := make(map[uint64][]uint64)
+	for k, v := range ix.m {
+		byGroup[v.GroupID] = append(byGroup[v.GroupID], k)
+	}
+	out := make([]CarouselGroup, 0, len(byGroup))
+	for gid, members := range byGroup {
+		sort.Slice(members, func(i, j int) bool { return members[i] < members[j] })
+		out = append(out, CarouselGroup{ID: gid, Members: members})
+	}
+	sort.Slice(out, func(i, j int) bool { return len(out[i].Members) > len(out[j].Members) })
+	return out
 }
 
 // Members — число номеров во всех каруселях.

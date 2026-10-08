@@ -94,3 +94,57 @@ func TestChainHolderNilIsSafe(t *testing.T) {
 		t.Fatal("empty holder index must be nil")
 	}
 }
+
+func TestAnalyzeChainsListReturnsPathsLongestFirst(t *testing.T) {
+	edges := map[uint64]uint64{
+		1: 2, 2: 3, // путь из 3
+		10: 11, 11: 12, 12: 13, 13: 14, // путь из 5
+	}
+	ix := AnalyzeChains(edges, 10)
+	list := ix.List()
+	if len(list) != 2 {
+		t.Fatalf("chains = %d, want 2", len(list))
+	}
+	if len(list[0].Path) != 5 || len(list[1].Path) != 3 {
+		t.Fatalf("not sorted longest-first: %v / %v", list[0].Path, list[1].Path)
+	}
+	if list[0].Ring || list[1].Ring {
+		t.Fatalf("neither chain is a ring: %+v", list)
+	}
+}
+
+func TestAnalyzeChainsListMarksRing(t *testing.T) {
+	edges := map[uint64]uint64{1: 2, 2: 3, 3: 1}
+	ix := AnalyzeChains(edges, 10)
+	list := ix.List()
+	if len(list) != 1 || !list[0].Ring {
+		t.Fatalf("ring not reflected in List(): %+v", list)
+	}
+}
+
+func TestAnalyzeChainsNoDuplicateFragmentsBelowHubThreshold(t *testing.T) {
+	// Регрессия: несколько независимых источников (1..5) переадресуют на один и тот же C(100),
+	// ниже порога хаба (5 < 10) — C не хаб, обход продолжается через него дальше (100 → 200 → 300).
+	// Карта в Go перебирается в неопределённом порядке: раньше любой из 1..5 мог случайно стать
+	// стартом ПОСЛЕ того, как через C уже прошёл другой источник, и путь C→200→300 задваивался.
+	edges := map[uint64]uint64{
+		1: 100, 2: 100, 3: 100, 4: 100, 5: 100,
+		100: 200, 200: 300,
+	}
+	ix := AnalyzeChains(edges, 10)
+	list := ix.List()
+	seen := map[uint64]int{}
+	for _, c := range list {
+		for _, n := range c.Path {
+			seen[n]++
+		}
+	}
+	for n, c := range seen {
+		if c > 1 {
+			t.Fatalf("node %d appears in %d chains, want at most 1: %+v", n, c, list)
+		}
+	}
+	if seen[300] != 1 {
+		t.Fatalf("tail node 300 must be reachable through exactly one chain: %+v", list)
+	}
+}

@@ -37,6 +37,17 @@ type Info struct {
 		Groups  int `json:"groups"`
 		Members int `json:"members"`
 	} `json:"fan"`
+	Chain struct {
+		Chains  int `json:"chains"`
+		Members int `json:"members"`
+	} `json:"chain"`
+	SimBox struct {
+		Members int `json:"members"`
+	} `json:"simbox"`
+	Carousel struct {
+		Groups  int `json:"groups"`
+		Members int `json:"members"`
+	} `json:"carousel"`
 	Numplan struct {
 		Enabled bool   `json:"enabled"`
 		Version string `json:"version"`
@@ -65,6 +76,15 @@ func (e *Engine) Info() Info {
 	in.TrackedNumbers = e.win.Len()
 	if fan := e.fan.Index(); fan != nil {
 		in.Fan.Groups, in.Fan.Members = fan.Groups(), fan.Members()
+	}
+	if ch := e.chains.Index(); ch != nil {
+		in.Chain.Chains, in.Chain.Members = len(ch.List()), ch.Members()
+	}
+	if sb := e.simbox.Index(); sb != nil {
+		in.SimBox.Members = sb.Members()
+	}
+	if cs := e.carsl.Index(); cs != nil {
+		in.Carousel.Groups, in.Carousel.Members = len(cs.List()), cs.Members()
 	}
 	if e.cfg.Plan != nil {
 		in.Numplan.Enabled, in.Numplan.Version = true, e.cfg.Plan.Version
@@ -142,6 +162,64 @@ func (e *Engine) FanGroups() []FanGroup {
 			fg.Members = append(fg.Members, fm)
 		}
 		out = append(out, fg)
+	}
+	return out
+}
+
+// ChainView — цепочка переадресации для панели: узлы по порядку переходов, в маскированном виде.
+type ChainView struct {
+	Nodes []string `json:"nodes"`
+	Depth int      `json:"depth"`
+	Ring  bool     `json:"ring"`
+}
+
+// Chains возвращает найденные цепочки переадресации (длинные первыми).
+func (e *Engine) ChainViews() []ChainView {
+	list := e.chains.Index().List()
+	out := make([]ChainView, 0, len(list))
+	for _, c := range list {
+		cv := ChainView{Depth: len(c.Path), Ring: c.Ring}
+		for _, n := range c.Path {
+			cv.Nodes = append(cv.Nodes, maskKey(n))
+		}
+		out = append(out, cv)
+	}
+	return out
+}
+
+// SimBoxView — отмеченный SIM-box номер для панели.
+type SimBoxView struct {
+	Number string `json:"number"`
+	Calls  uint32 `json:"calls"`
+	Peers  int    `json:"peers"`
+}
+
+// SimBoxMembers возвращает отмеченные SIM-box номера (самые активные первыми).
+func (e *Engine) SimBoxMembers() []SimBoxView {
+	list := e.simbox.Index().List()
+	out := make([]SimBoxView, 0, len(list))
+	for _, m := range list {
+		out = append(out, SimBoxView{Number: maskKey(m.Key), Calls: m.Calls, Peers: m.Peers})
+	}
+	return out
+}
+
+// CarouselView — закрытая группа номеров (карусель) для панели.
+type CarouselView struct {
+	ID      string   `json:"id"`
+	Members []string `json:"members"`
+}
+
+// CarouselGroups возвращает найденные карусели (крупные первыми).
+func (e *Engine) CarouselGroups() []CarouselView {
+	list := e.carsl.Index().List()
+	out := make([]CarouselView, 0, len(list))
+	for _, g := range list {
+		cv := CarouselView{ID: strconv.FormatUint(g.ID, 10)}
+		for _, n := range g.Members {
+			cv.Members = append(cv.Members, maskKey(n))
+		}
+		out = append(out, cv)
 	}
 	return out
 }

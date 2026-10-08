@@ -42,6 +42,9 @@ export const getStats = (windowSec, points) => api(`/v1/stats?window=${windowSec
 export const getEvents = (limit = 50, decision = '') => api(`/v1/events?limit=${limit}${decision ? '&decision=' + decision : ''}`);
 export const getModel = () => api('/v1/model');
 export const getFans = () => api('/v1/graph/fans');
+export const getChains = () => api('/v1/graph/chains');
+export const getSimBox = () => api('/v1/graph/simbox');
+export const getCarousel = () => api('/v1/graph/carousel');
 export const scoreCall = (call) => api('/v1/calls/score', { method: 'POST', body: call });
 export const getMLReport = () => api('/v1/ml/report');
 export const getMLService = () => api('/v1/ml/service');

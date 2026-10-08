@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"sort"
 	"sync"
 	"sync/atomic"
 )
@@ -71,8 +72,17 @@ type ChainInfo struct {
 	Ring  bool // цепочка замыкается сама на себя (кольцо)
 }
 
+// Chain — найденная цепочка переадресации целиком, в порядке переходов (для панели).
+type Chain struct {
+	Path []uint64 // узлы по порядку: B → C → D → …
+	Ring bool
+}
+
 // ChainIndex — результат анализа графа переадресаций. Неизменяем после создания.
-type ChainIndex struct{ m map[uint64]ChainInfo }
+type ChainIndex struct {
+	m      map[uint64]ChainInfo
+	chains []Chain
+}
 
 // Lookup ищет номер в индексе цепочек.
 func (ix *ChainIndex) Lookup(key uint64) (ChainInfo, bool) {
@@ -89,6 +99,14 @@ func (ix *ChainIndex) Members() int {
 		return 0
 	}
 	return len(ix.m)
+}
+
+// List возвращает найденные цепочки, длинные первыми. Срез нельзя изменять.
+func (ix *ChainIndex) List() []Chain {
+	if ix == nil {
+		return nil
+	}
+	return ix.chains
 }
 
 // HubFanIn — с какого числа различных источников цель переадресации считается легальным узлом
@@ -115,9 +133,31 @@ func AnalyzeChains(edges map[uint64]uint64, hubFanIn int) *ChainIndex {
 		}
 	}
 
+	// Узел, на который кто-то переадресует, не годится в начало обхода: он сам середина чьей-то
+	// цепочки, и `start` должен быть её настоящим началом — иначе порядок перебора карты (в Go
+	// не определён) мог бы случайно взять середину раньше начала и добавить в List() один и тот
+	// же путь дважды (целиком и обрубком). Истинные начала — узлы без входящих рёбер; то, что не
+	// является ничьим началом (чистое кольцо — у каждого узла есть входящее), донабирается вторым
+	// проходом по всем ещё не посещённым ключам edges.
+	hasIncoming := make(map[uint64]struct{}, len(edges))
+	for _, to := range edges {
+		hasIncoming[to] = struct{}{}
+	}
+	starts := make([]uint64, 0, len(edges))
+	for from := range edges {
+		if _, has := hasIncoming[from]; !has {
+			starts = append(starts, from)
+		}
+	}
+	for from := range edges { // второй проход: остатки чистых колец без настоящего начала
+		if _, has := hasIncoming[from]; has {
+			starts = append(starts, from)
+		}
+	}
+
 	ix := &ChainIndex{m: make(map[uint64]ChainInfo)}
 	visited := make(map[uint64]struct{}, len(edges))
-	for start := range edges {
+	for _, start := range starts {
 		if _, done := visited[start]; done {
 			continue
 		}
@@ -137,6 +177,10 @@ func AnalyzeChains(edges map[uint64]uint64, hubFanIn int) *ChainIndex {
 				ring = true
 				break // кольцо: дальше идти некуда, но путь уже содержит next
 			}
+			if _, claimed := visited[next]; claimed {
+				break // узел уже вошёл в чужую цепочку (несколько источников на один приёмник
+				// ниже порога хаба) — не дублируем хвост, обрываем здесь
+			}
 			path = append(path, next)
 			seen[next] = struct{}{}
 			cur = next
@@ -148,8 +192,10 @@ func AnalyzeChains(edges map[uint64]uint64, hubFanIn int) *ChainIndex {
 			for _, n := range path {
 				ix.m[n] = ChainInfo{Depth: len(path), Ring: ring}
 			}
+			ix.chains = append(ix.chains, Chain{Path: path, Ring: ring})
 		}
 	}
+	sort.Slice(ix.chains, func(i, j int) bool { return len(ix.chains[i].Path) > len(ix.chains[j].Path) })
 	return ix
 }
 

@@ -71,3 +71,16 @@ func TestSimBoxHolderNilIsSafe(t *testing.T) {
 		t.Fatal("empty holder must report not-found")
 	}
 }
+
+func TestSimBoxIndexList(t *testing.T) {
+	win := window.New(window.Config{})
+	for i := 0; i < 60; i++ {
+		win.Observe(simboxEvent(5, uint64(5000+i), simT0+int64(i*60), 90))
+	}
+	profiles := win.Profiles(simT0+4000, 3600*24, 1)
+	ix := AnalyzeSimBox(win, profiles, simT0+4000, SimBoxConfig{})
+	list := ix.List()
+	if len(list) != 1 || list[0].Key != 5 || list[0].Calls != 60 {
+		t.Fatalf("list = %+v", list)
+	}
+}

@@ -72,6 +72,9 @@ func (s *Server) Routes() http.Handler {
 	mux.Handle("GET /v1/ml/report", s.protect(http.HandlerFunc(s.handleMLReport)))
 	mux.Handle("GET /v1/ml/service", s.protect(http.HandlerFunc(s.handleMLService)))
 	mux.Handle("GET /v1/graph/fans", s.protect(http.HandlerFunc(s.handleFans)))
+	mux.Handle("GET /v1/graph/chains", s.protect(http.HandlerFunc(s.handleChains)))
+	mux.Handle("GET /v1/graph/simbox", s.protect(http.HandlerFunc(s.handleSimBox)))
+	mux.Handle("GET /v1/graph/carousel", s.protect(http.HandlerFunc(s.handleCarousel)))
 	return s.withRequestID(s.withLogging(s.withRecover(mux)))
 }
 

@@ -257,7 +257,7 @@ func TestForwardToKey(t *testing.T) {
 	if r.Event.ForwardTo != 0 {
 		t.Fatal("not forwarded → 0")
 	}
-	c.Direction = callrec.DirForwarded
+	c.Direction = "forwarded"
 	c.ForwardTo = "+7 916 600-00-02"
 	r, _ = e.Enrich(&c)
 	if r.Event.ForwardTo == 0 {

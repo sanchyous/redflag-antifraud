@@ -136,6 +136,84 @@ func TestEmptyFanGroups(t *testing.T) {
 	_ = context.Background()
 }
 
+func TestChainViewsMaskedAndOrdered(t *testing.T) {
+	e, clk := newEngine(t, nil)
+	for k := 0; k < 3; k++ {
+		b2c := call(fmt.Sprintf("cv-bc-%d", k), "+7 916 000-00-01", "+7 916 000-00-02", clk.Now(), 10)
+		b2c.Direction, b2c.ForwardTo = "forwarded", "+7 916 000-00-03"
+		e.Score(b2c)
+		c2d := call(fmt.Sprintf("cv-cd-%d", k), "+7 916 222-00-01", "+7 916 000-00-03", clk.Now(), 10)
+		c2d.Direction, c2d.ForwardTo = "forwarded", "+7 916 000-00-04"
+		e.Score(c2d)
+		clk.Advance(60)
+	}
+	e.RefreshChains()
+	chains := e.ChainViews()
+	if len(chains) != 1 || chains[0].Depth != 3 || chains[0].Ring {
+		t.Fatalf("chains = %+v", chains)
+	}
+	for _, n := range chains[0].Nodes {
+		if len(n) < 8 || n[:3] != "+7 " || contains(n, "0000002") {
+			t.Fatalf("raw digits leaked or unmasked: %q", n)
+		}
+	}
+}
+
+func TestEmptyChainsSimBoxCarousel(t *testing.T) {
+	e, _ := newEngine(t, nil)
+	if c := e.ChainViews(); c == nil || len(c) != 0 {
+		t.Fatalf("no chains → empty non-nil list, got %#v", c)
+	}
+	if m := e.SimBoxMembers(); m == nil || len(m) != 0 {
+		t.Fatalf("no sim-box → empty non-nil list, got %#v", m)
+	}
+	if g := e.CarouselGroups(); g == nil || len(g) != 0 {
+		t.Fatalf("no carousel → empty non-nil list, got %#v", g)
+	}
+}
+
+func TestSimBoxMembersMaskedAndSorted(t *testing.T) {
+	e, clk := newEngine(t, nil)
+	for i := 0; i < 60; i++ {
+		callee := fmt.Sprintf("+7 9%02d %03d-%02d-%02d", 10+i%30, i, i%10, i%100)
+		e.Score(call(fmt.Sprintf("sbv-%d", i), "+7 916 444-33-22", callee, clk.Now(), 90))
+		clk.Advance(60)
+	}
+	e.RefreshSimBox()
+	members := e.SimBoxMembers()
+	if len(members) != 1 || members[0].Calls != 60 || members[0].Number[:3] != "+7 " {
+		t.Fatalf("members = %+v", members)
+	}
+}
+
+func TestCarouselGroupsMaskedAndSorted(t *testing.T) {
+	e, clk := newEngine(t, nil)
+	group := []string{"+7 916 700-11-01", "+7 916 700-11-02", "+7 916 700-11-03", "+7 916 700-11-04", "+7 916 700-11-05"}
+	id := 0
+	for round := 0; round < 30; round++ {
+		for i, a := range group {
+			for j, b := range group {
+				if i == j {
+					continue
+				}
+				e.Score(call(fmt.Sprintf("cgv-%d", id), a, b, clk.Now(), 20))
+				id++
+			}
+		}
+		clk.Advance(10)
+	}
+	e.RefreshCarousel()
+	groups := e.CarouselGroups()
+	if len(groups) != 1 || len(groups[0].Members) != 5 || groups[0].ID == "" {
+		t.Fatalf("groups = %+v", groups)
+	}
+	for _, n := range groups[0].Members {
+		if n[:3] != "+7 " {
+			t.Fatalf("unmasked member: %q", n)
+		}
+	}
+}
+
 func logged(t *testing.T) (*bytes.Buffer, func(*Config)) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))

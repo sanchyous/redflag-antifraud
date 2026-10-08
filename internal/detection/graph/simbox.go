@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"sort"
 	"sync/atomic"
 
 	"github.com/sanchyous/redflag-antifraud/internal/detection/window"
@@ -52,6 +53,26 @@ func (ix *SimBoxIndex) Lookup(key uint64) (SimBoxInfo, bool) {
 	}
 	si, ok := ix.m[key]
 	return si, ok
+}
+
+// SimBoxEntry — отмеченный номер с его показателями (для панели).
+type SimBoxEntry struct {
+	Key uint64
+	SimBoxInfo
+}
+
+// List возвращает отмеченные номера, самые активные первыми. Аллоцирует на каждый вызов —
+// не горячий путь (панель мониторинга).
+func (ix *SimBoxIndex) List() []SimBoxEntry {
+	if ix == nil {
+		return nil
+	}
+	out := make([]SimBoxEntry, 0, len(ix.m))
+	for k, v := range ix.m {
+		out = append(out, SimBoxEntry{Key: k, SimBoxInfo: v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Calls > out[j].Calls })
+	return out
 }
 
 // Members — число отмеченных номеров.
