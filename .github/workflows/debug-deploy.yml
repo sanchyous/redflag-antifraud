@@ -10,8 +10,10 @@ jobs:
         run: |
           echo "=== docker ps -a ==="
           docker ps -a
-          echo "=== docker compose logs (tail) ==="
-          cd /home/deploy/redflag && docker compose --env-file /home/deploy/redflag/.env logs --tail=200 || true
-          echo "=== disk/mem ==="
-          df -h || true
-          free -h || true
+          echo "=== app container logs (tail 150) ==="
+          docker logs --tail=150 redflag-antifraud-app-1 2>&1 || true
+          echo "=== app container inspect (env, mounts) ==="
+          docker inspect redflag-antifraud-app-1 --format '{{json .Config.Env}}' || true
+          docker inspect redflag-antifraud-app-1 --format '{{json .Mounts}}' || true
+          echo "=== compose project dir ==="
+          find / -maxdepth 4 -iname "compose.yaml" -o -iname "docker-compose.yml" 2>/dev/null | grep -v proc
