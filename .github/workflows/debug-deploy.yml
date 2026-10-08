@@ -18,7 +18,8 @@ jobs:
             cp "$CFG/stage1.json" "$CFG/stage1.json.stale-$(date +%s)"
             echo "backed up stale model"
           fi
-          cat > /tmp/writemodel.go <<'EOF'
+          mkdir -p ./cmd/writemodel-tmp
+          cat > ./cmd/writemodel-tmp/main.go <<'EOF'
           package main
 
           import (
@@ -38,7 +39,8 @@ jobs:
           	}
           }
           EOF
-          go run /tmp/writemodel.go "$CFG/stage1.json"
+          go run ./cmd/writemodel-tmp "$CFG/stage1.json"
+          rm -rf ./cmd/writemodel-tmp
           cat "$CFG/stage1.json" | head -5
           echo "=== restart app to pick it up ==="
           docker restart redflag-antifraud-app-1
