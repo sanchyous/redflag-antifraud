@@ -1,0 +1,17 @@
+name: Debug Deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: [self-hosted, redflag]
+    steps:
+      - name: Container state and logs
+        run: |
+          echo "=== docker ps -a ==="
+          docker ps -a
+          echo "=== docker compose logs (tail) ==="
+          cd /home/deploy/redflag && docker compose --env-file /home/deploy/redflag/.env logs --tail=200 || true
+          echo "=== disk/mem ==="
+          df -h || true
+          free -h || true
