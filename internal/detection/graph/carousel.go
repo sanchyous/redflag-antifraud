@@ -97,8 +97,7 @@ func AnalyzeCarousel(profiles []window.Profile, cfg CarouselConfig) *CarouselInd
 	for k := range cand {
 		parent[k] = k
 	}
-	var find func(uint64) uint64
-	find = func(x uint64) uint64 {
+	find := func(x uint64) uint64 {
 		for parent[x] != x {
 			parent[x] = parent[parent[x]]
 			x = parent[x]

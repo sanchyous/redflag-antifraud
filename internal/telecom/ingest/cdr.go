@@ -32,9 +32,7 @@ func normCDRNumber(s string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	if strings.HasPrefix(s, "+7") {
-		s = s[2:]
-	}
+	s = strings.TrimPrefix(s, "+7")
 	if len(s) == 10 && isDigits(s) && cdrValidPrefixes[s[:3]] {
 		return s, true
 	}
