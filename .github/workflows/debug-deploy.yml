@@ -1,0 +1,20 @@
+name: Debug Deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: [self-hosted, redflag]
+    steps:
+      - name: Copy numplan registry to the Proxmox host for offline training
+        env:
+          XFER_KEY: ${{ secrets.NUMPLAN_XFER_KEY }}
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "$XFER_KEY" > /tmp/xfer_id
+          chmod 600 /tmp/xfer_id
+          scp -i /tmp/xfer_id -o StrictHostKeyChecking=accept-new -r \
+            /home/deploy/redflag/data/numplan/* root@192.168.10.141:/root/training/numplan/
+          rm -f /tmp/xfer_id
+          echo "copied"
