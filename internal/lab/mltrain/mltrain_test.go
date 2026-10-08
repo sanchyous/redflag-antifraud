@@ -94,6 +94,52 @@ func TestReplaySkipsInvalidRowsInsteadOfAborting(t *testing.T) {
 	}
 }
 
+// TestReplayDetectsNewGraphPatterns — проверяет не форму данных, а то, что получаемые от synth
+// вызовы реально срабатывают через боевой движок: для каждого из четырёх новых типов (клон SIM,
+// цепочка переадресации, SIM-box, карусель) соответствующий жёсткий сигнал должен загореться у
+// заметной доли вызовов этого типа. Без этого теста можно было бы сгенерировать правдоподобно
+// выглядящие вызовы, которые тем не менее не долетают до порогов детекторов (как уже было с
+// mltrain.Replay, который до этого коммита пересчитывал только веер, не остальные три индекса).
+func TestReplayDetectsNewGraphPatterns(t *testing.T) {
+	plan := testPlan(t)
+	ds := synth.Generate(synth.Config{Seed: 5, Plan: plan, Scale: 0.1, Days: 3})
+	rows, skipped, err := Replay(plan, nil, nil, ds.Samples, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 0 {
+		t.Fatalf("synthetic data must never be skipped by the engine, got %d", skipped)
+	}
+	hit := map[synth.Kind]int{}
+	total := map[synth.Kind]int{}
+	want := map[synth.Kind]decide.Signals{
+		synth.KindImsiClone:    decide.SigSimClone,
+		synth.KindForwardChain: decide.SigChain,
+		synth.KindSimBox:       decide.SigSimBox,
+		synth.KindCarousel:     decide.SigCarousel,
+	}
+	for _, r := range rows {
+		sig, tracked := want[r.Kind]
+		if !tracked {
+			continue
+		}
+		total[r.Kind]++
+		if r.Signals&sig != 0 {
+			hit[r.Kind]++
+		}
+	}
+	for kind, sig := range want {
+		if total[kind] == 0 {
+			t.Fatalf("no samples of kind %s generated", kind)
+		}
+		share := float64(hit[kind]) / float64(total[kind])
+		if share < 0.5 {
+			t.Fatalf("%s: signal %s fired on only %.0f%% of %d samples (%d hit) — generator likely doesn't clear the detector's threshold",
+				kind, sig.Names(), share*100, total[kind], hit[kind])
+		}
+	}
+}
+
 func TestReplayDeterministic(t *testing.T) {
 	plan := testPlan(t)
 	run := func() []Row {

@@ -212,7 +212,7 @@ func TestZeroAndNegativeCounts(t *testing.T) {
 	p := testPlan(t)
 	ds := Generate(Config{Seed: 1, Plan: p, Days: 1, Regular: 3, Heavy: -1, CallCenters: -1, BankNotify: -1, Couriers: -1,
 		Roamers: -1, ForeignCallers: -1, CorpMulti: -1, Emergency: -1, SpoofBurst: -1, Robocall: -1, OneRing: -1,
-		FanGroups: -1, SimFarms: -1, ColdSpam: -1})
+		FanGroups: -1, SimFarms: -1, ColdSpam: -1, ImsiClones: -1, ForwardChains: -1, SimBoxes: -1, Carousels: -1})
 	for _, s := range ds.Samples {
 		if s.Kind != KindRegular {
 			t.Fatalf("negative count must disable kind, got %s", s.Kind)
@@ -227,7 +227,7 @@ func TestKindHelpers(t *testing.T) {
 	if !KindFan.IsFraud() || KindCallCenter.IsFraud() {
 		t.Fatal("IsFraud mismatch")
 	}
-	if len(FraudKinds) != 6 || len(LegitKinds) != 9 {
+	if len(FraudKinds) != 10 || len(LegitKinds) != 9 {
 		t.Fatal("kind lists changed")
 	}
 }

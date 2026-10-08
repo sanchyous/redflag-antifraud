@@ -37,16 +37,21 @@ const (
 
 // Мошеннические типы.
 const (
-	KindSpoofBurst Kind = "spoof_burst"
-	KindRobocall   Kind = "robocall"
-	KindOneRing    Kind = "one_ring"
-	KindFan        Kind = "fan"
-	KindSimFarm    Kind = "sim_farm"
-	KindColdSpam   Kind = "cold_spam"
+	KindSpoofBurst   Kind = "spoof_burst"
+	KindRobocall     Kind = "robocall"
+	KindOneRing      Kind = "one_ring"
+	KindFan          Kind = "fan"
+	KindSimFarm      Kind = "sim_farm"
+	KindColdSpam     Kind = "cold_spam"
+	KindImsiClone    Kind = "imsi_clone"
+	KindForwardChain Kind = "forward_chain"
+	KindSimBox       Kind = "sim_box"
+	KindCarousel     Kind = "carousel"
 )
 
 // FraudKinds — все мошеннические типы.
-var FraudKinds = []Kind{KindSpoofBurst, KindRobocall, KindOneRing, KindFan, KindSimFarm, KindColdSpam}
+var FraudKinds = []Kind{KindSpoofBurst, KindRobocall, KindOneRing, KindFan, KindSimFarm, KindColdSpam,
+	KindImsiClone, KindForwardChain, KindSimBox, KindCarousel}
 
 // LegitKinds — все легитимные типы.
 var LegitKinds = []Kind{KindRegular, KindHeavy, KindCallCenter, KindBankNotify, KindCourier, KindRoamer,
@@ -87,6 +92,7 @@ type Config struct {
 	// Число абонентов по типам (0 → значение по умолчанию × Scale; отрицательное → 0).
 	Regular, Heavy, CallCenters, BankNotify, Couriers, Roamers, ForeignCallers, CorpMulti, Emergency int
 	SpoofBurst, Robocall, OneRing, FanGroups, SimFarms, ColdSpam                                     int
+	ImsiClones, ForwardChains, SimBoxes, Carousels                                                   int
 }
 
 var msk = time.FixedZone("MSK", 3*3600)
@@ -126,6 +132,10 @@ func (c *Config) defaults() {
 	set(&c.FanGroups, 3)
 	set(&c.SimFarms, 4)
 	set(&c.ColdSpam, 60)
+	set(&c.ImsiClones, 3)
+	set(&c.ForwardChains, 5)
+	set(&c.SimBoxes, 2)
+	set(&c.Carousels, 2)
 }
 
 type gen struct {
@@ -190,6 +200,18 @@ func Generate(cfg Config) *Dataset {
 	}
 	for i := 0; i < cfg.ColdSpam; i++ {
 		g.coldSpam()
+	}
+	for i := 0; i < cfg.ImsiClones; i++ {
+		g.imsiClone()
+	}
+	for i := 0; i < cfg.ForwardChains; i++ {
+		g.forwardChain()
+	}
+	for i := 0; i < cfg.SimBoxes; i++ {
+		g.simBox()
+	}
+	for i := 0; i < cfg.Carousels; i++ {
+		g.carousel()
 	}
 
 	sort.SliceStable(g.out, func(i, j int) bool { return g.out[i].Call.StartedAt.Before(g.out[j].Call.StartedAt) })
@@ -624,6 +646,130 @@ func (g *gen) coldSpam() {
 				c.DurationSec = g.durAnswered(15, 0.7)
 			}
 			g.add(KindColdSpam, c)
+		}
+	}
+}
+
+// randomIMSI — 15-значный IMSI (формат, не привязан к реальному MCC/MNC — для детектора важна
+// только устойчивая уникальность значений, не правдоподобие кода страны/сети).
+func (g *gen) randomIMSI() string {
+	return fmt.Sprintf("25001%010d", g.rng.Int64N(10_000_000_000))
+}
+
+// imsiClone — S4: один номер A с 4–10 разными IMSI; часть вызовов — почти в одну и ту же секунду
+// с разных IMSI (физически невозможно для одной SIM — прямая улика клонирования/подмены модуля
+// идентификации, не статистика).
+func (g *gen) imsiClone() {
+	caller := g.number(g.anyRegion())
+	imsis := make([]string, g.intn(4, 10))
+	for i := range imsis {
+		imsis[i] = g.randomIMSI()
+	}
+	perDay := g.intn(8, 20)
+	for day := 0; day < g.cfg.Days; day++ {
+		for i := 0; i < perDay; i++ {
+			t := g.humanTime(day)
+			imsi := imsis[g.rng.IntN(len(imsis))]
+			c := callrec.Call{Caller: caller, Callee: g.number(0), StartedAt: t, ConnType: g.connType(caller),
+				SrcCountry: "RU", SrcOperator: g.srcOperator(caller), IMSI: imsi}
+			if g.chance(0.7) {
+				c.DurationSec = g.durAnswered(60, 0.9)
+			}
+			g.add(KindImsiClone, c)
+			if g.chance(0.25) { // «одновременный» вызов с другой IMSI той же секундой-двумя
+				other := imsi
+				for other == imsi {
+					other = imsis[g.rng.IntN(len(imsis))]
+				}
+				c2 := c
+				c2.Callee = g.number(0)
+				c2.StartedAt = t.Add(time.Duration(g.rng.IntN(3)) * time.Second)
+				c2.IMSI = other
+				g.add(KindImsiClone, c2)
+			}
+		}
+	}
+}
+
+// forwardChain — S5: B→C→D(→E) — цепочка переадресации длиной 3–5 узлов, разные регионы плана
+// нумерации («операторы разные»). В ~30% случаев последний переход замыкается в кольцо на уже
+// пройденный узел, с длительностью 0 (сам факт кольца, а не разговор). Повторяется несколько раз
+// за период — рёбра статичны (B всегда переадресует на одну и ту же цель), как и у реальных
+// переадресаций: так их и находит graph.AnalyzeChains.
+func (g *gen) forwardChain() {
+	depth := g.intn(2, 4) // переходов: 2–4 → узлов: 3–5
+	nodes := make([]string, depth+1)
+	for i := range nodes {
+		nodes[i] = g.number(g.anyRegion())
+	}
+	ring := g.chance(0.3)
+	repeats := g.intn(5, 15)
+	for r := 0; r < repeats; r++ {
+		t := g.humanTime(g.rng.IntN(g.cfg.Days))
+		for i := 0; i < depth; i++ {
+			dialer := g.number(0)
+			target := nodes[i+1]
+			dur := g.durAnswered(45, 0.8)
+			if ring && i == depth-1 {
+				target = nodes[g.rng.IntN(i+1)] // замыкаем на уже пройденный узел цепочки
+				dur = 0
+			}
+			c := callrec.Call{Caller: dialer, Callee: nodes[i], StartedAt: t.Add(time.Duration(i) * time.Second),
+				DurationSec: dur, ConnType: g.connType(dialer), SrcCountry: "RU", SrcOperator: g.srcOperator(dialer),
+				Direction: "forwarded", ForwardTo: target}
+			g.add(KindForwardChain, c)
+		}
+	}
+}
+
+// simBox — S3: 3–8 SIM работают только на исходящие, весь период, адресаты практически никогда
+// не повторяются, длительность обычная (не короткая — иначе это веер/wangiri). Смены по часам
+// суток распределены так, что группа в сумме покрывает сутки целиком, а отдельный номер — только
+// свою часть часов: «без наложения» — свойство группы, не каждого номера по отдельности.
+func (g *gen) simBox() {
+	n := g.intn(3, 8)
+	region := g.anyRegion()
+	shiftLen := max(1, 24/n)
+	for i := 0; i < n; i++ {
+		caller := g.number(region)
+		startHour := i * shiftLen
+		callsPerDay := g.intn(55, 75)
+		for day := 0; day < g.cfg.Days; day++ {
+			for k := 0; k < callsPerDay; k++ {
+				t := g.cfg.Start.AddDate(0, 0, day).
+					Add(time.Duration(startHour+g.rng.IntN(shiftLen)) * time.Hour).
+					Add(time.Duration(g.rng.IntN(3600)) * time.Second)
+				c := callrec.Call{Caller: caller, Callee: g.number(0), StartedAt: t, ConnType: "mobile",
+					SrcCountry: "RU", SrcOperator: g.operatorOf(caller), DurationSec: g.durAnswered(90, 0.5)}
+				g.add(KindSimBox, c)
+			}
+		}
+	}
+}
+
+// carousel — S6: закрытая группа 5–10 номеров звонит только друг другу, 8–45 с, круглосуточно.
+// Объём на участника держится заметно выше порога детектора на каждые сутки периода отдельно
+// (не только в среднем за весь период) — иначе при коротком периоде обучения карусель не
+// наберёт нужный объём ни в одном скользящем окне.
+func (g *gen) carousel() {
+	n := g.intn(5, 10)
+	region := g.anyRegion()
+	members := make([]string, n)
+	for i := range members {
+		members[i] = g.number(region)
+	}
+	perDay := g.intn(105, 130)
+	for day := 0; day < g.cfg.Days; day++ {
+		for i := 0; i < n; i++ {
+			for k := 0; k < perDay; k++ {
+				j := g.rng.IntN(n - 1)
+				if j >= i {
+					j++
+				}
+				c := callrec.Call{Caller: members[i], Callee: members[j], StartedAt: g.humanTime(day),
+					ConnType: "mobile", SrcCountry: "RU", SrcOperator: g.operatorOf(members[i]), DurationSec: g.intn(8, 45)}
+				g.add(KindCarousel, c)
+			}
 		}
 	}
 }
