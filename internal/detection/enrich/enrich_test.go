@@ -233,6 +233,43 @@ func TestSubscriberHash(t *testing.T) {
 	}
 }
 
+func TestImsiHash(t *testing.T) {
+	e := New(nil, nil)
+	c := base()
+	r, _ := e.Enrich(&c)
+	if r.Event.IMSI != 0 {
+		t.Fatal("no imsi → 0")
+	}
+	c.IMSI = "250012345678901"
+	a, _ := e.Enrich(&c)
+	b, _ := e.Enrich(&c)
+	c.IMSI = "250019999999999"
+	d, _ := e.Enrich(&c)
+	if a.Event.IMSI == 0 || a.Event.IMSI != b.Event.IMSI || a.Event.IMSI == d.Event.IMSI {
+		t.Fatal("imsi hash must be stable and distinct")
+	}
+}
+
+func TestForwardToKey(t *testing.T) {
+	e := New(testPlan(t), nil)
+	c := base()
+	r, _ := e.Enrich(&c)
+	if r.Event.ForwardTo != 0 {
+		t.Fatal("not forwarded → 0")
+	}
+	c.Direction = callrec.DirForwarded
+	c.ForwardTo = "+7 916 600-00-02"
+	r, _ = e.Enrich(&c)
+	if r.Event.ForwardTo == 0 {
+		t.Fatal("forwarded call must carry a non-zero forward target key")
+	}
+	c.ForwardTo = "мусор"
+	r, _ = e.Enrich(&c)
+	if r.Event.ForwardTo != 0 {
+		t.Fatal("unparseable forward target must be 0, not crash")
+	}
+}
+
 func BenchmarkEnrich(b *testing.B) {
 	e := New(testPlan(b), nil)
 	c := base()

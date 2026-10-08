@@ -38,6 +38,14 @@ func Prior() *Model {
 	set(features.FanMember, 2.5, 0)
 	set(features.FanSize, 0.3, 0)
 	set(features.SubscriberNumbers, 0.9, 0)
+	// Графовые признаки официального датасета кейса (клон SIM, цепочка переадресации, SIM-box,
+	// карусель) — структурное доказательство не хуже spoof/fan, а не статистический сдвиг:
+	// веса сопоставимы с ними, а не с рядовыми счётчиками.
+	set(features.ImsiCount, 1.5, 0)
+	set(features.ChainMember, 2.5, 0)
+	set(features.ChainDepth, 0.3, 0)
+	set(features.SimBoxMember, 2.5, 0)
+	set(features.CarouselMember, 2.5, 0)
 
 	base := -6.2
 	for i := 0; i < features.N; i++ {

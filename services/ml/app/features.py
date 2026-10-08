@@ -33,6 +33,11 @@ MONOTONE_INCREASING = {
     "fan_member",
     "fan_size",
     "subscriber_numbers",
+    "imsi_count",
+    "chain_member",
+    "chain_depth",
+    "simbox_member",
+    "carousel_member",
 }
 MONOTONE_DECREASING = {"call_duration"}
 

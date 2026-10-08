@@ -75,10 +75,21 @@ type Config struct {
 	Policy     decide.Policy       // нулевые Review/Block берутся из модели
 	Window     window.Config
 	Fan        graph.Config
-	// FanSpan — период профилей для поиска вееров (по умолчанию 3600 с).
+	// FanSpan — период профилей для поиска вееров (по умолчанию 3600 с). Веер — всплеск: номера
+	// активны плотно и недолго, часовое окно достаточно.
 	FanSpan uint32
-	Loc     *time.Location
-	Now     func() time.Time // источник времени (тесты)
+	SimBox  graph.SimBoxConfig
+	// SimBoxSpan — период профилей для поиска SIM-box (по умолчанию 24 ч). SIM-box и карусель —
+	// устойчивый, а не взрывной паттерн: объём набирается за дни, не за час, поэтому окно шире.
+	SimBoxSpan uint32
+	Carousel   graph.CarouselConfig
+	// CarouselSpan — период профилей для поиска карусели (по умолчанию 24 ч, см. SimBoxSpan).
+	CarouselSpan uint32
+	// ChainHubFanIn — с какого числа источников цель переадресации считается легальной горячей
+	// линией, а не звеном мошеннической цепочки (по умолчанию graph.HubFanIn).
+	ChainHubFanIn int
+	Loc           *time.Location
+	Now           func() time.Time // источник времени (тесты)
 	// ML — клиент ML-сервиса (стадия 2 каскада). nil — только стадия 1.
 	ML *mlclient.Client
 	// Log — логгер движка: события состояния (активация и отключение ML, обновление вееров, очистка).
@@ -120,6 +131,11 @@ type Engine struct {
 	dedupe *window.Dedupe
 	subs   *graph.Subscribers
 	fan    graph.Holder
+	idents *graph.Idents
+	edges  *graph.ChainEdges
+	chains graph.ChainHolder
+	simbox graph.SimBoxHolder
+	carsl  graph.CarouselHolder
 	model  atomic.Pointer[scoring.Model]
 	policy atomic.Pointer[decide.Policy]
 	ml     atomic.Pointer[mlState]
@@ -147,12 +163,20 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.FanSpan == 0 {
 		cfg.FanSpan = 3600
 	}
+	if cfg.SimBoxSpan == 0 {
+		cfg.SimBoxSpan = 24 * 3600
+	}
+	if cfg.CarouselSpan == 0 {
+		cfg.CarouselSpan = 24 * 3600
+	}
 	e := &Engine{
 		cfg:    cfg,
 		enrich: enrich.New(cfg.Plan, cfg.Loc),
 		win:    window.New(cfg.Window),
 		dedupe: window.NewDedupe(0),
 		subs:   graph.NewSubscribers(0),
+		idents: graph.NewIdents(0),
+		edges:  graph.NewChainEdges(0),
 		class:  cfg.Classifier,
 		now:    cfg.Now,
 		log:    logx.Component(cfg.Log, "engine"),
@@ -181,6 +205,15 @@ func (e *Engine) Model() *scoring.Model { return e.model.Load() }
 
 // Fan возвращает текущий индекс вееров.
 func (e *Engine) Fan() *graph.Index { return e.fan.Index() }
+
+// Chains возвращает текущий индекс цепочек переадресации.
+func (e *Engine) Chains() *graph.ChainIndex { return e.chains.Index() }
+
+// SimBox возвращает текущий индекс SIM-box.
+func (e *Engine) SimBox() *graph.SimBoxIndex { return e.simbox.Index() }
+
+// Carousel возвращает текущий индекс карусели.
+func (e *Engine) Carousel() *graph.CarouselIndex { return e.carsl.Index() }
 
 // Windows возвращает хранилище окон (для метрик и тестов).
 func (e *Engine) Windows() *window.Store { return e.win }
@@ -244,6 +277,23 @@ func (e *Engine) Analyze(c *callrec.Call) (Analysis, error) {
 	}
 	if res.Event.Subscriber != 0 && res.Caller.Valid {
 		in.SubNums = e.subs.Observe(res.Event.Subscriber, res.Event.Caller)
+	}
+	if res.Caller.Valid {
+		in.ImsiCount = e.idents.Observe(res.Event.Caller, res.Event.IMSI)
+	}
+	if res.Event.ForwardTo != 0 {
+		e.edges.Observe(res.Event.Callee, res.Event.ForwardTo)
+	}
+	if ci, ok := e.chains.Lookup(res.Event.Caller); ok {
+		in.Chain, in.InChain = ci, true
+	} else if ci, ok := e.chains.Lookup(res.Event.Callee); ok {
+		in.Chain, in.InChain = ci, true
+	}
+	if _, ok := e.simbox.Lookup(res.Event.Caller); ok {
+		in.InSimBox = true
+	}
+	if _, ok := e.carsl.Lookup(res.Event.Caller); ok {
+		in.InCarousel = true
 	}
 	features.Build(&in, &a.Vec)
 	return a, nil
@@ -389,6 +439,50 @@ func (e *Engine) RefreshFan() *graph.Index {
 	return ix
 }
 
+// RefreshChains пересчитывает индекс цепочек переадресации по накопленным рёбрам Callee→ForwardTo.
+func (e *Engine) RefreshChains() *graph.ChainIndex {
+	edges := e.edges.Snapshot()
+	ix := graph.AnalyzeChains(edges, e.cfg.ChainHubFanIn)
+	prev := e.chains.Index()
+	e.chains.Store(ix)
+	if prev.Members() != ix.Members() {
+		e.log.Info("chain_index_updated", "members", ix.Members(), "edges", len(edges))
+	}
+	return ix
+}
+
+// RefreshSimBox пересчитывает индекс SIM-box по снимку профилей окон.
+func (e *Engine) RefreshSimBox() *graph.SimBoxIndex {
+	profiles := e.win.Profiles(e.now().Unix(), e.cfg.SimBoxSpan, e.cfg.SimBox.MinCallsOrDefault())
+	ix := graph.AnalyzeSimBox(e.win, profiles, e.now().Unix(), e.cfg.SimBox)
+	prev := e.simbox.Index()
+	e.simbox.Store(ix)
+	if prev.Members() != ix.Members() {
+		e.log.Info("simbox_index_updated", "members", ix.Members(), "profiles", len(profiles))
+	}
+	return ix
+}
+
+// RefreshCarousel пересчитывает индекс карусели по снимку профилей окон.
+func (e *Engine) RefreshCarousel() *graph.CarouselIndex {
+	profiles := e.win.Profiles(e.now().Unix(), e.cfg.CarouselSpan, e.cfg.Carousel.MinCallsOrDefault())
+	ix := graph.AnalyzeCarousel(profiles, e.cfg.Carousel)
+	prev := e.carsl.Index()
+	e.carsl.Store(ix)
+	if prev.Members() != ix.Members() {
+		e.log.Info("carousel_index_updated", "members", ix.Members(), "profiles", len(profiles))
+	}
+	return ix
+}
+
+// RefreshGraph пересчитывает все периодические графовые индексы (веер, цепочки, SIM-box, карусель).
+func (e *Engine) RefreshGraph() {
+	e.RefreshFan()
+	e.RefreshChains()
+	e.RefreshSimBox()
+	e.RefreshCarousel()
+}
+
 // Run запускает фоновые задачи до отмены ctx: пересчёт вееров и очистка состояния.
 func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 	if fanEvery <= 0 {
@@ -414,7 +508,7 @@ func (e *Engine) Run(ctx context.Context, fanEvery, sweepEvery time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ft.C:
-			e.RefreshFan()
+			e.RefreshGraph()
 		case <-mt.C:
 			// Стадия неактивна — повторяем быстро; активна — перечитываем описание модели раз в минуту.
 			if e.cfg.ML != nil && (e.ml.Load() == nil || time.Since(lastML) >= mlEvery) {

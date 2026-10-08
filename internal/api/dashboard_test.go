@@ -199,7 +199,7 @@ func TestModelAndFansEndpoints(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &m); err != nil || rr.Code != 200 {
 		t.Fatalf("%d %v", rr.Code, err)
 	}
-	if len(m.Stage1.Features) != 26 || m.Stage1.Version == "" || m.MinSignals < 1 || m.ML != nil {
+	if len(m.Stage1.Features) != 31 || m.Stage1.Version == "" || m.MinSignals < 1 || m.ML != nil {
 		t.Fatalf("model view: %+v", m)
 	}
 	rr = do(t, h, "GET", "/v1/graph/fans", "")

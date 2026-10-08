@@ -11,10 +11,11 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from .data import CLASS_EMERGENCY
 
-# Жёсткие сигналы-свидетельства (подмена номера и нераспределённый CLI): пол вердикта review независимо
-# от модели. Биты — контракт с Go (decide.HardSignals = SigSpoof|SigUnallocated = 1|2); Go проверяет
-# значения тестом TestSignalBitsAreStableContract.
-HARD_SIGNALS_MASK = 3
+# Жёсткие сигналы-свидетельства (подмена номера, нераспределённый CLI, клон SIM, цепочка
+# переадресации, SIM-box, карусель): пол вердикта review независимо от модели. Биты — контракт
+# с Go (decide.HardSignals = SigSpoof|SigUnallocated|SigSimClone|SigChain|SigSimBox|SigCarousel
+# = 1|2|128|256|512|1024 = 1923); Go проверяет значения тестом TestSignalBitsAreStableContract.
+HARD_SIGNALS_MASK = 1923
 
 
 def hard_mask(df: pd.DataFrame) -> np.ndarray:

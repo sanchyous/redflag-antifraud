@@ -114,6 +114,16 @@ func Text(feature int, raw float32) string {
 		return fmt.Sprintf("размер веера: %d номеров", n)
 	case features.SubscriberNumbers:
 		return fmt.Sprintf("на того же абонента оформлено ещё %d номеров", n)
+	case features.ImsiCount:
+		return fmt.Sprintf("на номере сменилось ещё %d IMSI: признак клонирования SIM", n)
+	case features.ChainMember:
+		return "номер входит в цепочку переадресации"
+	case features.ChainDepth:
+		return fmt.Sprintf("глубина цепочки переадресации: %d номеров", n)
+	case features.SimBoxMember:
+		return "только исходящие новым собеседникам, входящих нет: признак SIM-box"
+	case features.CarouselMember:
+		return "номер входит в закрытую группу, звонящую только внутри себя (карусель)"
 	}
 	return features.Names[feature]
 }

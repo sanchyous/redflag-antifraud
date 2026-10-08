@@ -83,8 +83,10 @@ func TestHardSignalFloor(t *testing.T) {
 
 // Значения битов сигналов — контракт с Python (HARD_SIGNALS_MASK). Менять порядок нельзя без правки там.
 func TestSignalBitsAreStableContract(t *testing.T) {
-	if SigSpoof != 1 || SigUnallocated != 2 || HardSignals != 3 {
-		t.Fatalf("signal bits changed: spoof=%d unallocated=%d hard=%d", SigSpoof, SigUnallocated, HardSignals)
+	if SigSpoof != 1 || SigUnallocated != 2 || SigSimClone != 128 || SigChain != 256 ||
+		SigSimBox != 512 || SigCarousel != 1024 || HardSignals != 1923 {
+		t.Fatalf("signal bits changed: spoof=%d unallocated=%d sim_clone=%d chain=%d sim_box=%d carousel=%d hard=%d",
+			SigSpoof, SigUnallocated, SigSimClone, SigChain, SigSimBox, SigCarousel, HardSignals)
 	}
 }
 

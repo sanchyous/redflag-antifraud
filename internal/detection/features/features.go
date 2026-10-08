@@ -40,6 +40,11 @@ const (
 	FanMember
 	FanSize
 	SubscriberNumbers
+	ImsiCount
+	ChainMember
+	ChainDepth
+	SimBoxMember
+	CarouselMember
 	N // число признаков
 )
 
@@ -51,12 +56,14 @@ var Names = [N]string{
 	"call_short", "call_hangup_1s", "call_unanswered", "call_night", "call_duration",
 	"foreign_ingress", "spoof", "caller_unallocated", "caller_invalid", "operator_mismatch", "conn_international",
 	"fan_member", "fan_size", "subscriber_numbers",
+	"imsi_count", "chain_member", "chain_depth", "simbox_member", "carousel_member",
 }
 
 // logScaled — признаки, которые к модели идут как log1p (тяжёлые хвосты счётчиков).
 var logScaled = [N]bool{
 	OutCalls1h: true, OutCalls24h: true, OutPeers1h: true, OutPeers24h: true, OutRegions24h: true,
 	InCalls1h: true, InPeers24h: true, CallDuration: true, FanSize: true, SubscriberNumbers: true,
+	ImsiCount: true, ChainDepth: true,
 }
 
 // Vector — признаки одного вызова.
@@ -74,6 +81,12 @@ type Input struct {
 	SubNums   int // число номеров абонента (0 — неизвестно)
 	ShortSec  int // порог «короткого» разговора (по умолчанию 10)
 	DurationS uint32
+
+	ImsiCount  int // число разных IMSI на номере (0/1 — не аномально)
+	Chain      graph.ChainInfo
+	InChain    bool
+	InSimBox   bool
+	InCarousel bool
 }
 
 const minEvidence = 5 // минимум вызовов, чтобы доли и «новизна» имели смысл
@@ -129,6 +142,15 @@ func Build(in *Input, v *Vector) {
 	if in.SubNums > 1 {
 		raw[SubscriberNumbers] = float32(in.SubNums - 1) // «лишние» номера сверх первого
 	}
+	if in.ImsiCount > 1 {
+		raw[ImsiCount] = float32(in.ImsiCount - 1) // «лишние» IMSI сверх первого
+	}
+	if in.InChain {
+		raw[ChainMember] = 1
+		raw[ChainDepth] = float32(in.Chain.Depth)
+	}
+	raw[SimBoxMember] = b2f(in.InSimBox)
+	raw[CarouselMember] = b2f(in.InCarousel)
 
 	for k := 0; k < N; k++ {
 		if logScaled[k] {

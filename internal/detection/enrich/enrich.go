@@ -145,6 +145,12 @@ func (e *Enricher) Enrich(c *callrec.Call) (Result, error) {
 	if dur < 0 {
 		dur = 0
 	}
+	var forwardTo uint64
+	if c.Direction == callrec.DirForwarded {
+		if fn, err := phone.Parse(c.ForwardTo); err == nil {
+			forwardTo = fn.Key()
+		}
+	}
 	r.Event = callrec.Event{
 		TS:           c.StartedAt.Unix(),
 		Caller:       callerKey(r.Caller),
@@ -154,6 +160,8 @@ func (e *Enricher) Enrich(c *callrec.Call) (Result, error) {
 		CalleeRegion: r.Callee.RegionID,
 		Flags:        flags,
 		Subscriber:   hashID(c.SubscriberID),
+		IMSI:         hashID(c.IMSI),
+		ForwardTo:    forwardTo,
 	}
 	return r, nil
 }

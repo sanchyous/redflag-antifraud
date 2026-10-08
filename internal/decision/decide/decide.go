@@ -41,9 +41,16 @@ const (
 	SigRegionSweep
 	SigSimFarm
 	SigRobot
+	SigSimClone // несколько IMSI на одном номере (S4: клон SIM / смена модуля идентификации)
+	SigChain    // участник многошаговой цепочки переадресации (S5)
+	SigSimBox   // только исходящие, новый собеседник раз за разом, входящих нет (S3)
+	SigCarousel // закрытая группа номеров звонит только друг другу (S6)
 )
 
-var sigNames = [...]string{"spoof", "unallocated_caller", "fan", "burst", "region_sweep", "sim_farm", "robot"}
+var sigNames = [...]string{
+	"spoof", "unallocated_caller", "fan", "burst", "region_sweep", "sim_farm", "robot",
+	"sim_clone", "forward_chain", "sim_box", "carousel",
+}
 
 // Names возвращает имена взведённых сигналов.
 func (s Signals) Names() []string {
@@ -75,6 +82,7 @@ type Policy struct {
 	FarmNumbers   float32 // «лишних» номеров абонента для sim_farm (по умолчанию 9)
 	RobotIndex    float32 // индекс регулярности для robot (по умолчанию 0.9)
 	RobotCalls1h  float32 // вызовов в час для robot (по умолчанию 20)
+	CloneImsi     float32 // «лишних» IMSI на номере для sim_clone (по умолчанию 2)
 }
 
 // Defaults подставляет значения по умолчанию в нулевые поля.
@@ -93,6 +101,7 @@ func (p Policy) Defaults() Policy {
 	def(&p.FarmNumbers, 9)
 	def(&p.RobotIndex, 0.9)
 	def(&p.RobotCalls1h, 20)
+	def(&p.CloneImsi, 2)
 	return p
 }
 
@@ -122,14 +131,28 @@ func (p Policy) StrongSignals(v *features.Vector) Signals {
 	if r[features.OutGapRobot] >= p.RobotIndex && r[features.OutCalls1h] >= p.RobotCalls1h {
 		s |= SigRobot
 	}
+	if r[features.ImsiCount] >= p.CloneImsi {
+		s |= SigSimClone
+	}
+	if r[features.ChainMember] > 0 {
+		s |= SigChain
+	}
+	if r[features.SimBoxMember] > 0 {
+		s |= SigSimBox
+	}
+	if r[features.CarouselMember] > 0 {
+		s |= SigCarousel
+	}
 	return s
 }
 
-// HardSignals — сигналы-свидетельства: российский номер при иностранном входе (подмена) и номер из
-// нераспределённого диапазона. Это не статистика, а прямое доказательство подмены CLI, поэтому они
-// задают пол вердикта review независимо от модели. Значения битов — контракт с Python-сервисом
-// (services/ml/training/evaluate.py: HARD_SIGNALS_MASK).
-const HardSignals = SigSpoof | SigUnallocated
+// HardSignals — сигналы-свидетельства: не статистика, а прямое структурное доказательство —
+// подмена CLI, номер из нераспределённого диапазона, несколько IMSI на одном номере, участие в
+// графе цепочки переадресации/SIM-box/карусели. Такие сигналы задают пол вердикта review
+// независимо от модели (и работают даже без обученной модели — именно на это рассчитаны: на
+// официальном датасете кейса модель не переобучалась, эти четыре схемы размечены только графом).
+// Значения битов — контракт с Python-сервисом (services/ml/training/evaluate.py: HARD_SIGNALS_MASK).
+const HardSignals = SigSpoof | SigUnallocated | SigSimClone | SigChain | SigSimBox | SigCarousel
 
 // Result — итог решения.
 type Result struct {

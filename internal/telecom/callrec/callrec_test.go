@@ -30,6 +30,9 @@ func TestValidate(t *testing.T) {
 		{"bad conn", func(c *Call) { c.ConnType = "carrier-pigeon" }, []string{"conn_type_invalid"}},
 		{"unanswered with duration", func(c *Call) { c.Answered = ptr(false) }, []string{"unanswered_with_duration"}},
 		{"bad country", func(c *Call) { c.SrcCountry = "RUS" }, []string{"src_country_invalid"}},
+		{"forwarded without target", func(c *Call) { c.Direction = DirForwarded }, []string{"forward_to_required"}},
+		{"forwarded with target ok", func(c *Call) { c.Direction = DirForwarded; c.ForwardTo = "+7 916 000-00-01" }, nil},
+		{"bad direction", func(c *Call) { c.Direction = Direction(99) }, []string{"direction_invalid"}},
 		{"multiple", func(c *Call) { c.CallID = ""; c.DurationSec = -5 }, []string{"call_id_required", "duration_negative"}},
 	}
 	for _, tc := range cases {
@@ -73,6 +76,21 @@ func TestConnType(t *testing.T) {
 		t.Fatal("unknown conn type must be rejected")
 	}
 	if ConnVoIP.String() != "voip" || ConnType(99).String() != "unknown" {
+		t.Fatal("String mismatch")
+	}
+}
+
+func TestParseDirection(t *testing.T) {
+	for in, want := range map[string]Direction{"": DirUnknown, "incoming": DirIncoming, "01": DirIncoming,
+		"outgoing": DirOutgoing, "02": DirOutgoing, "FORWARDED": DirForwarded, "03": DirForwarded} {
+		if got, ok := ParseDirection(in); !ok || got != want {
+			t.Fatalf("ParseDirection(%q) = %v,%v", in, got, ok)
+		}
+	}
+	if _, ok := ParseDirection("x"); ok {
+		t.Fatal("unknown direction must be rejected")
+	}
+	if DirForwarded.String() != "forwarded" || Direction(99).String() != "" {
 		t.Fatal("String mismatch")
 	}
 }

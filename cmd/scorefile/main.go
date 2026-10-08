@@ -36,7 +36,7 @@ func main() {
 		allowFile  = flag.String("allowlist", "", "файл allowlist проверенных номеров")
 		mlURL      = flag.String("ml-url", "", "адрес ML-сервиса; пусто — только линейная стадия")
 		mlKey      = flag.String("ml-key", os.Getenv("ML_API_KEY"), "ключ ML-сервиса")
-		fanEvery   = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать веера")
+		fanEvery   = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать графовые индексы (веер, цепочки, SIM-box, карусель)")
 	)
 	flag.Parse()
 	if *in == "" {
@@ -125,7 +125,7 @@ func main() {
 		ts := rc.Call.StartedAt.Unix()
 		clock.Store(ts)
 		if *fanEvery > 0 && ts-lastFan >= int64(fanEvery.Seconds()) {
-			eng.RefreshFan()
+			eng.RefreshGraph()
 			lastFan = ts
 		}
 		resp, err := eng.Score(&rc.Call)

@@ -318,6 +318,125 @@ func TestSubscriberFarmSignal(t *testing.T) {
 	}
 }
 
+func TestSimCloneSignal(t *testing.T) {
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	var r Response
+	for k := 0; k < 4; k++ { // один и тот же номер, 4 разных IMSI
+		c := call(fmt.Sprintf("imsi-%d", k), "+7 916 111-22-33", "+7 495 765-43-21", clk.Now(), 30)
+		c.IMSI = fmt.Sprintf("2500%011d", k)
+		r, _ = e.Score(c)
+		clk.Advance(60)
+	}
+	if !hasFactor(r, "imsi_count") {
+		t.Fatalf("imsi clone must be explained: %+v", r)
+	}
+	if !containsSignal(r, "sim_clone") {
+		t.Fatalf("signals = %v", r.Signals)
+	}
+}
+
+func TestForwardChainSignal(t *testing.T) {
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	// B → C → D: два перехода переадресации, статично повторяются несколько раз.
+	for k := 0; k < 3; k++ {
+		b2c := call(fmt.Sprintf("fwd-bc-%d", k), "+7 916 000-00-01", "+7 916 000-00-02", clk.Now(), 10)
+		b2c.Direction, b2c.ForwardTo = callrec.DirForwarded, "+7 916 000-00-03"
+		e.Score(b2c)
+		c2d := call(fmt.Sprintf("fwd-cd-%d", k), "+7 916 222-00-01", "+7 916 000-00-03", clk.Now(), 10)
+		c2d.Direction, c2d.ForwardTo = callrec.DirForwarded, "+7 916 000-00-04"
+		e.Score(c2d)
+		clk.Advance(60)
+	}
+	ix := e.RefreshChains()
+	if ix.Members() != 3 {
+		t.Fatalf("chain members = %d, want 3 (B, C, D)", ix.Members())
+	}
+	r, _ := e.Score(call("plain-from-b", "+7 916 000-00-02", "+7 916 999-99-99", clk.Now(), 10))
+	if !hasFactor(r, "chain_member") {
+		t.Fatalf("chain membership must be explained: %+v", r)
+	}
+	if !containsSignal(r, "forward_chain") {
+		t.Fatalf("signals = %v", r.Signals)
+	}
+}
+
+func TestSimBoxSignal(t *testing.T) {
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	for i := 0; i < 60; i++ { // только исходящие, всегда новому собеседнику, обычная длительность
+		callee := fmt.Sprintf("+7 9%02d %03d-%02d-%02d", 10+i%30, i, i%10, i%100)
+		e.Score(call(fmt.Sprintf("sb-%d", i), "+7 916 444-00-00", callee, clk.Now(), 90))
+		clk.Advance(60)
+	}
+	ix := e.RefreshSimBox()
+	if ix.Members() != 1 {
+		t.Fatalf("sim-box members = %d, want 1", ix.Members())
+	}
+	r, _ := e.Score(call("sb-next", "+7 916 444-00-00", "+7 916 555-00-00", clk.Now(), 90))
+	if !hasFactor(r, "simbox_member") {
+		t.Fatalf("sim-box membership must be explained: %+v", r)
+	}
+	if !containsSignal(r, "sim_box") {
+		t.Fatalf("signals = %v", r.Signals)
+	}
+}
+
+func TestSimBoxSpanCoversMoreThanAnHour(t *testing.T) {
+	// Регрессия: SIM-box — устойчивый паттерн на днях, не всплеск. Раньше SimBox/Carousel
+	// пересчитывались по тому же часовому окну, что и веер (FanSpan=3600с по умолчанию), и
+	// вызовы, растянутые на сутки, в него просто не помещались — живой прогон cmd/cdrflag на
+	// официальном датасете кейса находил 0 SIM-box вместо ожидаемых по независимому анализу
+	// сотен. Раскладываем те же 60 вызовов на 5 часов (за пределы часового FanSpan, но в
+	// пределах суточного SimBoxSpan по умолчанию).
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	for i := 0; i < 60; i++ {
+		callee := fmt.Sprintf("+7 9%02d %03d-%02d-%02d", 10+i%30, i, i%10, i%100)
+		e.Score(call(fmt.Sprintf("sbs-%d", i), "+7 916 444-11-11", callee, clk.Now(), 90))
+		clk.Advance(300) // 5 мин между вызовами × 60 = 5 часов общего разброса
+	}
+	ix := e.RefreshSimBox()
+	if ix.Members() != 1 {
+		t.Fatalf("sim-box members = %d, want 1 (span must cover the full 5h spread)", ix.Members())
+	}
+}
+
+func TestCarouselSignal(t *testing.T) {
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	group := []string{"+7 916 700-00-01", "+7 916 700-00-02", "+7 916 700-00-03", "+7 916 700-00-04", "+7 916 700-00-05"}
+	id := 0
+	for round := 0; round < 30; round++ { // каждый с каждым, 30 раундов: по 120 исходящих на номер
+		for i, a := range group {
+			for j, b := range group {
+				if i == j {
+					continue
+				}
+				e.Score(call(fmt.Sprintf("car-%d", id), a, b, clk.Now(), 20))
+				id++
+			}
+		}
+		clk.Advance(10)
+	}
+	ix := e.RefreshCarousel()
+	if ix.Members() != 5 {
+		t.Fatalf("carousel members = %d, want 5", ix.Members())
+	}
+	r, _ := e.Score(call("car-next", group[0], group[1], clk.Now(), 20))
+	if !hasFactor(r, "carousel_member") {
+		t.Fatalf("carousel membership must be explained: %+v", r)
+	}
+	if !containsSignal(r, "carousel") {
+		t.Fatalf("signals = %v", r.Signals)
+	}
+}
+
+func containsSignal(r Response, name string) bool {
+	for _, s := range r.Signals {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestModelHotSwap(t *testing.T) {
 	e, _ := newEngine(t, nil)
 	c := func(id string) *callrec.Call {

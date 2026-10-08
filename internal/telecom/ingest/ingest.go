@@ -209,8 +209,12 @@ func scalar(v any) string {
 	return fmt.Sprint(v)
 }
 
-// ReadFile читает файл по расширению: .csv, .tsv, .jsonl, .ndjson, .json (как JSONL).
+// ReadFile читает файл по расширению: .csv, .tsv, .jsonl, .ndjson, .json (как JSONL), .cdr
+// (позиционный формат официального датасета кейса — см. cdr.go).
 func ReadFile(path string) (*Result, error) {
+	if IsCDRPath(path) {
+		return ReadCDRFile(path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -222,7 +226,7 @@ func ReadFile(path string) (*Result, error) {
 	case ".jsonl", ".ndjson", ".json":
 		return ReadJSONL(f)
 	}
-	return nil, fmt.Errorf("ingest: неизвестное расширение %q (нужны .csv, .jsonl)", filepath.Ext(path))
+	return nil, fmt.Errorf("ingest: неизвестное расширение %q (нужны .csv, .jsonl, .cdr)", filepath.Ext(path))
 }
 
 func add(res *Result, ln int, get func(string) string) {

@@ -44,6 +44,42 @@ func ParseConnType(s string) (ConnType, bool) {
 	return ConnUnknown, false
 }
 
+// Direction — роль записи в сигнализации коммутатора: кто кому звонил и не было ли переадресации.
+// Большинство источников этого не присылают (DirUnknown) — тогда вызов считается исходящим от
+// Caller, как раньше. Приходит из сигнализации, не выводится из Caller/Callee.
+type Direction uint8
+
+const (
+	DirUnknown Direction = iota
+	DirIncoming
+	DirOutgoing
+	DirForwarded
+)
+
+var dirNames = [...]string{"", "incoming", "outgoing", "forwarded"}
+
+func (d Direction) String() string {
+	if int(d) < len(dirNames) {
+		return dirNames[d]
+	}
+	return ""
+}
+
+// ParseDirection разбирает строку из API; пустая строка — DirUnknown, ok=false для нераспознанной.
+func ParseDirection(s string) (Direction, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return DirUnknown, true
+	case "incoming", "in", "01":
+		return DirIncoming, true
+	case "outgoing", "out", "02":
+		return DirOutgoing, true
+	case "forwarded", "forward", "03":
+		return DirForwarded, true
+	}
+	return DirUnknown, false
+}
+
 // Call — вызов в том виде, в каком он приходит по API. Номера — как есть (полные или маски).
 type Call struct {
 	CallID      string    `json:"call_id"`
@@ -60,6 +96,14 @@ type Call struct {
 	SrcOperator string `json:"src_operator,omitempty"`
 	// SubscriberID — идентификатор абонента у оператора (для «номеров на одного абонента»); необязателен.
 	SubscriberID string `json:"subscriber_id,omitempty"`
+	// IMSI — идентификатор SIM вызывающего из сигнализации. Один номер с россыпью разных IMSI —
+	// признак клонирования SIM/подмены модуля идентификации (детектор: internal/detection/graph.Idents).
+	IMSI string `json:"imsi,omitempty"`
+	// Direction — входящий/исходящий/переадресация с точки зрения коммутатора; пусто — неизвестно
+	// (считается исходящим от Caller). ForwardTo обязателен при Direction == DirForwarded.
+	Direction Direction `json:"direction,omitempty"`
+	// ForwardTo — куда Callee переадресовал вызов (при Direction == DirForwarded).
+	ForwardTo string `json:"forward_to,omitempty"`
 }
 
 const (
@@ -98,6 +142,12 @@ func (c *Call) Validate(now time.Time, maxFuture time.Duration) []string {
 	if c.SrcCountry != "" && len(c.SrcCountry) != 2 {
 		errs = append(errs, "src_country_invalid")
 	}
+	if c.Direction > DirForwarded {
+		errs = append(errs, "direction_invalid")
+	}
+	if c.Direction == DirForwarded && strings.TrimSpace(c.ForwardTo) == "" {
+		errs = append(errs, "forward_to_required")
+	}
 	return errs
 }
 
@@ -120,7 +170,7 @@ const (
 	FlagOperatorMismatch
 )
 
-// Event — компактная запись для окон и графа: без строк, копируется по значению (40 байт).
+// Event — компактная запись для окон и графа: без строк, копируется по значению.
 type Event struct {
 	TS           int64  // unix-секунды старта
 	Caller       uint64 // phone.Number.Key()
@@ -130,6 +180,8 @@ type Event struct {
 	CalleeRegion uint16
 	Flags        uint16
 	Subscriber   uint64 // хэш subscriber_id, 0 — неизвестен
+	IMSI         uint64 // хэш IMSI вызывающего, 0 — неизвестен (детектор клонов SIM)
+	ForwardTo    uint64 // phone.Number.Key() цели переадресации, 0 — не переадресован
 }
 
 // Has проверяет наличие флага.
