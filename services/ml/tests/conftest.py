@@ -40,6 +40,11 @@ FEATURES = [
     "fan_member",
     "fan_size",
     "subscriber_numbers",
+    "imsi_count",
+    "chain_member",
+    "chain_depth",
+    "simbox_member",
+    "carousel_member",
 ]
 
 

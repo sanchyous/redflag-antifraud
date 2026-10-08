@@ -22,6 +22,8 @@ def with_x(df):
         "call_duration",
         "fan_size",
         "subscriber_numbers",
+        "imsi_count",
+        "chain_depth",
     }
     for f in FEATURES:
         out[f"x_{f}"] = np.log1p(out[f"r_{f}"]) if f in logged else out[f"r_{f}"]
