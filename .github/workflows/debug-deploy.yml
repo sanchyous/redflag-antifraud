@@ -1,0 +1,11 @@
+name: Debug Deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: [self-hosted, redflag]
+    steps:
+      - name: Show deploy env (paths only, no secrets printed)
+        run: |
+          grep -vi 'PASSWORD\|SECRET\|KEY' /home/deploy/redflag/.env || true
