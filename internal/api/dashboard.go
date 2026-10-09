@@ -278,6 +278,26 @@ func (s *Server) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET /ui/", http.StripPrefix("/ui/", uiHandler()))
 	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/ui/", http.StatusMovedPermanently) })
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/ui/", http.StatusFound) })
+	mux.HandleFunc("GET /stack-map", stackMapHandler)
+}
+
+// stackMapHandler отдаёт карту стека и инфраструктуры — самостоятельную статическую страницу
+// (web/stack-map.html), не часть SPA-панели. Путь без расширения и без /ui/, по просьбе — отдельный
+// самостоятельный маршрут верхнего уровня.
+func stackMapHandler(w http.ResponseWriter, r *http.Request) {
+	b, err := web.StackMap.ReadFile("stack-map.html")
+	if err != nil {
+		http.Error(w, "stack map unavailable", http.StatusInternalServerError)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+	_, _ = w.Write(b)
 }
 
 // uiFiles нужен тестам: список встроенных файлов.

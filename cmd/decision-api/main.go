@@ -194,7 +194,7 @@ func main() {
 		ErrorLog:          slog.NewLogLogger(logx.Component(logger, "http").Handler(), slog.LevelWarn),
 	}
 	go func() {
-		log.Info("listening", "addr", cfg.Addr, "ui", "/ui/", "docs", "/docs")
+		log.Info("listening", "addr", cfg.Addr, "ui", "/ui/", "docs", "/docs", "stack_map", "/stack-map")
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen_failed", "err", err.Error())
 			os.Exit(1)

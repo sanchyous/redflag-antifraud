@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RedFlag — карта стека и инфраструктуры</title>
+<link rel="stylesheet" href="/ui/css/app.css">
+<style>
+  body { background: var(--surface); color: var(--on-surface); font-family: "Roboto", system-ui, sans-serif;
+    margin: 0; padding: 32px 20px 80px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header.page { margin-bottom: 36px; }
+  .brand-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .brand-name-sm { font-family: "Boxcer", "Arial Black", sans-serif; font-size: 20px; color: var(--brand); letter-spacing: .02em; }
+  h1 { font-size: 26px; font-weight: 500; margin: 10px 0 8px; }
+  .lede { color: var(--on-surface-variant); max-width: 760px; line-height: 1.6; font-size: 14.5px; }
+  nav.back { margin-top: 14px; font-size: 13px; }
+  nav.back a { color: var(--primary); text-decoration: none; margin-right: 18px; }
+  nav.back a:hover { text-decoration: underline; }
+
+  /* ---- легенда ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 22px 0 40px; padding: 14px 18px;
+    background: var(--surface-container-low); border: 1px solid var(--outline-variant); border-radius: var(--shape-md); font-size: 12.5px; }
+  .legend .item { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); }
+  .legend .swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+
+  /* ---- поток сверху вниз ---- */
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+  .connector { display: flex; flex-direction: column; align-items: center; padding: 6px 0; color: var(--outline); }
+  .connector .bar { width: 2px; height: 22px; background: var(--outline-variant); }
+  .connector .arrow { font-size: 15px; line-height: 1; color: var(--outline); margin-top: -2px; }
+  .connector .label { font-size: 11.5px; color: var(--on-surface-variant); background: var(--surface);
+    padding: 2px 10px; border: 1px solid var(--outline-variant); border-radius: var(--shape-full); margin: 4px 0; }
+
+  .zone { border: 1px solid var(--outline-variant); border-radius: var(--shape-lg); background: var(--surface-container-low);
+    padding: 22px 24px; }
+  .zone > .zhead { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+  .zone > .zhead h2 { font-size: 17px; font-weight: 500; margin: 0; }
+  .zone .ztag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--on-surface-variant); }
+  .zone .zwhy { color: var(--on-surface-variant); font-size: 13px; line-height: 1.55; margin: 8px 0 16px; max-width: 820px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+  .chip { font-size: 11.5px; padding: 3px 9px; border-radius: var(--shape-full); background: var(--surface-container);
+    border: 1px solid var(--outline-variant); color: var(--on-surface-variant); font-family: "Roboto Mono", ui-monospace, monospace; }
+
+  /* внешняя граница зоны — какой тип среды */
+  .zone.dev { border-color: var(--outline-variant); }
+  .zone.ci { border-left: 4px solid var(--tertiary); }
+  .zone.host { border-left: 4px solid var(--secondary); }
+  .zone.vm { border: 1px dashed var(--outline); background: var(--surface-container); }
+  .zone.ext { border-left: 4px solid var(--primary); }
+
+  /* ---- карточки сервисов внутри зоны ---- */
+  .cards { display: grid; gap: 16px; }
+  .cards.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cards.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--outline-variant); border-radius: var(--shape-md);
+    padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 14.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .card p.role { color: var(--on-surface-variant); font-size: 12.5px; margin: 0 0 10px; line-height: 1.5; }
+  .card p.why { font-size: 12px; color: var(--on-surface-variant); line-height: 1.55; margin: 10px 0 0;
+    padding-top: 10px; border-top: 1px dashed var(--outline-variant); }
+  .card p.why b { color: var(--on-surface); font-weight: 500; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.ext { background: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 20%, transparent); }
+  .dot.int { background: var(--on-surface-variant); }
+  .dot.ok { background: var(--success); }
+  .port { font-size: 11px; font-family: ui-monospace, monospace; color: var(--on-surface-variant); }
+  .port.exposed { color: var(--primary); font-weight: 500; }
+
+  /* VM-контейнер с вложенными карточками и внутренними связями */
+  .vm-inner { display: flex; flex-direction: column; gap: 0; margin-top: 14px; }
+  .vm-inner .card { position: relative; }
+  .mini-connector { display: flex; align-items: center; justify-content: center; height: 20px; color: var(--outline); font-size: 13px; }
+  .mini-connector span { background: var(--surface-container); padding: 0 8px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 860px) {
+    .split, .cards.cols-2, .cards.cols-3 { grid-template-columns: 1fr; }
+  }
+
+  footer.page { margin-top: 48px; color: var(--on-surface-variant); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="brand-row"><span class="brand-name-sm">REDFLAG</span><span class="lede" style="margin:0">— карта стека и инфраструктуры</span></div>
+    <h1>Где что крутится и почему</h1>
+    <p class="lede">Один вызов проходит через код на нескольких разных машинах прежде чем превратиться в
+      ответ API — от ноутбука разработчика до контейнера в закрытом контуре. Эта схема показывает весь
+      путь целиком: какая среда, какой стек, какая связь и почему именно так, а не иначе. Снизу вверх —
+      путь кода (разработка → CI/CD → продакшен); внутри «Домашний сервер» — путь обученной модели,
+      который идёт отдельно от пути кода.</p>
+    <nav class="back"><a href="/ui/">← панель мониторинга</a><a href="/docs">спецификация API</a></nav>
+  </header>
+
+  <div class="legend">
+    <div class="item"><span class="swatch" style="background:var(--tertiary)"></span>CI / автоматизация</div>
+    <div class="item"><span class="swatch" style="background:var(--secondary)"></span>физический/виртуальный хост</div>
+    <div class="item"><span class="swatch" style="background:var(--primary)"></span>доступно снаружи</div>
+    <div class="item"><span class="swatch" style="background:var(--on-surface-variant)"></span>только внутри сети</div>
+    <div class="item"><span class="dot ok" style="width:14px;height:14px"></span>используется в проде прямо сейчас</div>
+  </div>
+
+  <div class="flow">
+
+    <section class="zone dev">
+      <div class="zhead"><h2>Разработка</h2><span class="ztag">локально</span></div>
+      <p class="zwhy">Код и документация пишутся и проверяются локально до того, как попасть в git — здесь же
+        прогоняются быстрые проверки (`make check`) и ручное тестирование против живого стенда.</p>
+      <div class="chips">
+        <span class="chip">Go 1.25</span><span class="chip">Python 3.12</span><span class="chip">git</span>
+        <span class="chip">gofmt · vet · staticcheck</span><span class="chip">ruff · pytest</span>
+      </div>
+    </section>
+
+    <div class="connector"><div class="bar"></div><div class="label">git push → main</div><div class="arrow">▼</div></div>
+
+    <section class="zone ci">
+      <div class="zhead"><h2>GitHub</h2><span class="ztag">репозиторий + Actions</span></div>
+      <p class="zwhy">Каждый push в <code>main</code> запускает два независимых workflow. Они намеренно
+        выполняются в разных средах — это ключевое архитектурное решение всего CI/CD контура.</p>
+      <div class="cards cols-2">
+        <div class="card">
+          <h3><span class="dot ok"></span>CI</h3>
+          <p class="role">Линтеры и тесты: Go (<code>gofmt</code>, <code>vet</code>, <code>staticcheck</code>,
+            <code>go test -race</code>) и Python (<code>ruff</code>, <code>pytest</code>), плюс пробная сборка
+            обоих Docker-образов.</p>
+          <div class="chips"><span class="chip">GitHub-hosted runner</span><span class="chip">ubuntu-latest</span></div>
+          <p class="why"><b>Почему здесь:</b> проверке кода не нужен доступ к закрытой инфраструктуре —
+            она должна проходить одинаково для любого пуша, даже если демо-стенд сейчас недоступен.</p>
+        </div>
+        <div class="card">
+          <h3><span class="dot ok"></span>Deploy</h3>
+          <p class="role"><code>docker compose up -d --build</code> — пересобирает и перезапускает сервис
+            на демо-стенде, затем ждёт <code>/health</code>.</p>
+          <div class="chips"><span class="chip">self-hosted runner</span><span class="chip">внутри VM ↓</span></div>
+          <p class="why"><b>Почему здесь:</b> раннер выполняется физически внутри демо-VM — у него есть
+            прямой доступ к <code>.env</code>, сокету Docker и примонтированным каталогам. Вынести деплой на
+            облачный раннер значило бы городить SSH и секреты заново, когда нужный доступ уже есть локально.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="connector"><div class="bar"></div><div class="label">self-hosted runner выполняется внутри</div><div class="arrow">▼</div></div>
+
+    <section class="zone host">
+      <div class="zhead"><h2>Домашний сервер</h2><span class="ztag">bare metal · Proxmox</span></div>
+      <p class="zwhy">Один физический хост несёт две разные роли, и это сделано нарочно: виртуальная машина —
+        для постоянно работающего демо-сервиса, а сам хост напрямую — для редкой, но тяжёлой задачи обучения
+        модели, которой виртуализация только мешала бы.</p>
+
+      <div class="split">
+        <div class="card" style="background:var(--surface-container)">
+          <h3><span class="dot int"></span>Обучение модели</h3>
+          <p class="role">Полный конвейер переобучения: выгрузка признаков боевым движком, логистическая
+            регрессия (стадия 1), CatBoost с монотонными ограничениями (стадия 2).</p>
+          <div class="chips">
+            <span class="chip">Go cmd/export</span><span class="chip">Python</span><span class="chip">CatBoost</span>
+            <span class="chip">scikit-learn / scipy</span>
+          </div>
+          <p class="why"><b>Почему прямо на хосте, а не в VM или контейнере:</b> обучение — разовая, тяжёлая
+            по CPU задача, а не постоянный сервис; гонять её через слой виртуализации ради задачи, которая
+            и так займёт всё железо на несколько минут, бессмысленно. Результат — файлы модели — переносится
+            на VM отдельно, по требованию, а не живёт тут постоянно.</p>
+        </div>
+
+        <div class="zone vm" style="padding:16px 18px">
+          <div class="zhead" style="margin-bottom:2px"><h2 style="font-size:14.5px">VM · redflagvm</h2><span class="ztag">Ubuntu</span></div>
+          <p class="zwhy" style="margin:4px 0 10px">Постоянно работающая виртуальная машина — ровно тот же
+            принцип, что и у разделения CI/Deploy: демо-сервис живёт в изолированной, воспроизводимой среде,
+            а не прямо на хосте вперемешку с обучением.</p>
+          <div class="chips" style="margin-bottom:14px"><span class="chip">self-hosted GitHub Actions runner</span><span class="chip">Docker Compose</span></div>
+
+          <div class="vm-inner">
+            <div class="card">
+              <h3><span class="dot ext"></span>app — ядро (Go)</h3>
+              <p class="role">HTTP API, скоринг (стадия 1), панель <code>/ui/</code>, эта страница.</p>
+              <div class="chips"><span class="chip">Go 1.25</span><span class="chip">net/http</span><span class="chip">встроенная панель, без сборки фронтенда</span></div>
+              <p class="port exposed">порт 8000 — наружу</p>
+            </div>
+            <div class="mini-connector"><span>↕ внутренняя сеть compose</span></div>
+            <div class="card">
+              <h3><span class="dot int"></span>ml — ML-сервис (Python)</h3>
+              <p class="role">Стадия 2: CatBoost + TreeSHAP, калибровка, пороги.</p>
+              <div class="chips"><span class="chip">Python 3.12</span><span class="chip">FastAPI</span><span class="chip">uvicorn</span><span class="chip">CatBoost</span></div>
+              <p class="port">без внешнего порта — виден только сервису <code>app</code></p>
+              <p class="why"><b>Почему без внешнего порта:</b> у ML-сервиса нет причин быть доступным из
+                интернета напрямую — единственный легитимный вызывающий это ядро, а изоляция на уровне сети
+                дешевле и надёжнее, чем изоляция на уровне проверки токена.</p>
+            </div>
+            <div class="mini-connector"><span>↕ внутренняя сеть compose</span></div>
+            <div class="card">
+              <h3><span class="dot int"></span>postgres — журнал решений</h3>
+              <p class="role">Асинхронный журнал рискованных решений (<code>review</code>/<code>block</code>) и выборочно <code>allow</code>.</p>
+              <div class="chips"><span class="chip">postgres:17-alpine</span><span class="chip">именованный volume</span></div>
+              <p class="port">без внешнего порта, данные переживают пересоздание контейнера</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector" style="margin-top:10px"><div class="bar"></div><div class="label">временный SSH-ключ — только на время переноса, затем отозван</div></div>
+      <p class="zwhy" style="margin-top:0">Модель с хоста попадает в VM не через постоянный доверенный канал, а
+        разовой операцией: ключ создаётся непосредственно перед переносом, используется один раз и сразу
+        удаляется — с хоста обучения, из секретов GitHub и из временного workflow. Долгоживущего доступа
+        между обучающей машиной и демо-окружением не существует в принципе.</p>
+    </section>
+
+    <div class="connector"><div class="bar"></div><div class="label">:8000</div><div class="arrow">▼</div></div>
+
+    <section class="zone ext">
+      <div class="zhead"><h2>Внешний доступ</h2><span class="ztag">жюри / пользователь</span></div>
+      <p class="zwhy">Единственная точка входа снаружи — порт сервиса <code>app</code>. Всё остальное
+        (ML-сервис, база данных, хост обучения) снаружи не видно и не адресуемо в принципе, не только по
+        правам доступа.</p>
+      <div class="chips">
+        <span class="chip">GET /ui/ — панель</span><span class="chip">POST /v1/calls/score</span>
+        <span class="chip">GET /docs — Swagger</span><span class="chip">GET /stack-map — эта страница</span>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="page">Эта страница — часть репозитория (<code>web/stack-map.html</code>), отдаётся тем же
+    ядром по адресу <code>/stack-map</code>, без отдельного деплоя. Подробности — в
+    <a href="/docs" style="color:var(--primary)">документации</a> проекта, раздел «Архитектура».</footer>
+</div>
+</body>
+</html>
