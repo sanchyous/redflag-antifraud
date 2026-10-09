@@ -6,10 +6,19 @@
 // проход двойной: первый прогревает окна/граф, второй считает решения уже по полной истории
 // закрытого набора (см. комментарий у первого прохода в main).
 //
-//	go run ./cmd/cdrflag -numplan /path/to/numplan -indir cdr_out -out submission.txt
+// Намеренно без флага -numplan (в отличие от cmd/scorefile): операторские коды кейса (025-027,
+// 899/810/834, 210/214/200, 842/499/892) — вымышленная нумерация, не реестр Россвязи. Если всё же
+// подключить сюда реальный справочник (например унаследовав NUMPLAN_DIR из окружения), почти
+// каждый вызывающий номер кейса не найдётся в нём и получит signal=unallocated_caller — не потому
+// что номер вне диапазонов, а потому что диапазоны не те в принципе. Это не гипотетический риск:
+// именно так и проверялось при подготовке ADR-0019 — unallocated_caller взлетел с 0 до 107 636 из
+// 108 766 отмеченных номеров, когда флаг включили по ошибке.
+//
+//	go run ./cmd/cdrflag -indir cdr_out -out submission.txt [-ml-url http://ml:8100]
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -21,10 +30,10 @@ import (
 	"time"
 
 	"github.com/sanchyous/redflag-antifraud/internal/decision/engine"
+	"github.com/sanchyous/redflag-antifraud/internal/decision/mlclient"
 	"github.com/sanchyous/redflag-antifraud/internal/decision/scoring"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/ingest"
-	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/phone"
 )
 
@@ -43,27 +52,21 @@ func splitChainSignal(signals []string) (own bool, rest []string) {
 
 func main() {
 	var (
-		numplanDir = flag.String("numplan", os.Getenv("NUMPLAN_DIR"), "каталог с CSV реестра Россвязи")
-		indir      = flag.String("indir", "", "каталог с файлами CDR_*.cdr")
-		out        = flag.String("out", "submission.txt", "куда записать итоговый список номеров")
-		modelFile  = flag.String("model", "", "линейная модель стадии 1 (JSON); пусто — экспертная")
-		allowFile  = flag.String("allowlist", "", "файл allowlist проверенных номеров")
-		fanEvery   = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать графовые индексы на первом проходе (прогрев)")
-		anySignal  = flag.Bool("any-signal", false, "отмечать и решения без объяснимого сигнала (чистая модель без графовых/жёстких улик) — по умолчанию выключено: без ретрейна модели на этом датасете такие решения не обоснованы объяснимой уликой")
+		indir     = flag.String("indir", "", "каталог с файлами CDR_*.cdr")
+		out       = flag.String("out", "submission.txt", "куда записать итоговый список номеров")
+		modelFile = flag.String("model", "", "линейная модель стадии 1 (JSON); пусто — экспертная")
+		allowFile = flag.String("allowlist", "", "файл allowlist проверенных номеров")
+		mlURL     = flag.String("ml-url", "", "адрес ML-сервиса (стадия 2, CatBoost); пусто — только линейная стадия")
+		mlKey     = flag.String("ml-key", os.Getenv("ML_API_KEY"), "ключ ML-сервиса")
+		fanEvery  = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать графовые индексы на первом проходе (прогрев)")
+		anySignal = flag.Bool("any-signal", false, "отмечать и решения без объяснимого сигнала (чистая модель без графовых/жёстких улик) — по умолчанию выключено: без ретрейна модели на этом датасете такие решения не обоснованы объяснимой уликой")
 	)
 	flag.Parse()
 	if *indir == "" {
 		log.Fatal("укажите -indir")
 	}
-	var plan *numplan.Plan
-	if *numplanDir != "" {
-		var err error
-		if plan, err = numplan.LoadDir(*numplanDir); err != nil {
-			log.Fatalf("numplan: %v", err)
-		}
-	} else {
-		log.Print("справочник не задан: региональные признаки и сигнал нераспределённого номера отключены")
-	}
+	log.Print("справочник нумерации не используется: операторские коды кейса вымышленные, не реестр Россвязи " +
+		"(см. комментарий в начале файла) — региональные признаки и сигнал нераспределённого номера отключены")
 
 	files, err := filepath.Glob(filepath.Join(*indir, "CDR_*.cdr"))
 	if err != nil || len(files) == 0 {
@@ -91,7 +94,7 @@ func main() {
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].Call.StartedAt.Before(recs[j].Call.StartedAt) })
 
 	var clock atomic.Int64
-	cfg := engine.Config{Plan: plan, Now: func() time.Time { return time.Unix(clock.Load(), 0) },
+	cfg := engine.Config{Now: func() time.Time { return time.Unix(clock.Load(), 0) }, // Plan нарочно не задан, см. doc-комментарий файла
 		// SIM-box и карусель — устойчивый паттерн на днях, не на часе (по умолчанию движка — 24ч):
 		// закрытый набор кейса конечен (471 файл, 5 суток), окно шире всей истории ничего не стоит
 		// (ring-буфер окна и так ограничен по числу событий на номер, не по времени).
@@ -115,9 +118,21 @@ func main() {
 		}
 		_ = f.Close()
 	}
+	if *mlURL != "" {
+		if cfg.ML, err = mlclient.New(mlclient.Config{BaseURL: *mlURL, APIKey: *mlKey, Timeout: 2 * time.Second, BreakerFailures: 1000}); err != nil {
+			log.Fatal(err)
+		}
+	}
 	eng, err := engine.New(cfg)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if cfg.ML != nil {
+		if err := eng.RefreshML(context.Background()); err != nil {
+			log.Fatalf("ML недоступен или несовместим: %v", err)
+		}
+		_ = eng.WarmupML(context.Background())
+		log.Printf("ML-стадия активна: %s", eng.MLVersion())
 	}
 	flagged := make(map[string]map[string]struct{})
 	markFlagged := func(number string, signals []string) {
