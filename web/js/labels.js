@@ -34,6 +34,10 @@ const FACTORS = {
   carousel_member: 'Карусель (закрытая группа)',
   rule_spoof: 'Правило: подмена номера',
   rule_unallocated: 'Правило: номер вне диапазонов',
+  rule_sim_clone: 'Правило: клон SIM',
+  rule_chain: 'Правило: цепочка переадресации',
+  rule_sim_box: 'Правило: SIM-box',
+  rule_carousel: 'Правило: карусель',
 };
 
 const SIGNALS = {
@@ -67,6 +71,8 @@ const KINDS = {
   foreign_caller: 'Звонки из-за рубежа',
   corp_multi: 'Корпоративные мультисим',
   emergency: 'Экстренные службы',
+  night_watch: 'Ночные диспетчеры и охрана',
+  utility_broadcast: 'Оповещение ЖКХ/МЧС',
   spoof_burst: 'Подмена номера + всплеск',
   robocall: 'Робозвонки',
   one_ring: 'Один звонок (перезвон)',
@@ -79,6 +85,6 @@ const KINDS = {
   carousel: 'Карусель (закрытая группа)',
 };
 
-export const LEGIT_KINDS = ['regular', 'heavy_user', 'call_center', 'bank_notify', 'courier', 'roamer', 'foreign_caller', 'corp_multi'];
+export const LEGIT_KINDS = ['regular', 'heavy_user', 'call_center', 'bank_notify', 'courier', 'roamer', 'foreign_caller', 'corp_multi', 'emergency', 'night_watch', 'utility_broadcast'];
 export const FRAUD_KINDS = ['spoof_burst', 'robocall', 'one_ring', 'fan', 'sim_farm', 'cold_spam', 'imsi_clone', 'forward_chain', 'sim_box', 'carousel'];
 export const kindName = (k) => KINDS[k] || k;

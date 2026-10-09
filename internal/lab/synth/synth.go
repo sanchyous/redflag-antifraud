@@ -24,15 +24,17 @@ type Kind string
 
 // Легитимные типы.
 const (
-	KindRegular       Kind = "regular"
-	KindHeavy         Kind = "heavy_user"
-	KindCallCenter    Kind = "call_center"
-	KindBankNotify    Kind = "bank_notify"
-	KindCourier       Kind = "courier"
-	KindRoamer        Kind = "roamer"
-	KindForeignCaller Kind = "foreign_caller"
-	KindCorpMulti     Kind = "corp_multi"
-	KindEmergency     Kind = "emergency"
+	KindRegular          Kind = "regular"
+	KindHeavy            Kind = "heavy_user"
+	KindCallCenter       Kind = "call_center"
+	KindBankNotify       Kind = "bank_notify"
+	KindCourier          Kind = "courier"
+	KindRoamer           Kind = "roamer"
+	KindForeignCaller    Kind = "foreign_caller"
+	KindCorpMulti        Kind = "corp_multi"
+	KindEmergency        Kind = "emergency"
+	KindNightWatch       Kind = "night_watch"
+	KindUtilityBroadcast Kind = "utility_broadcast"
 )
 
 // Мошеннические типы.
@@ -55,7 +57,7 @@ var FraudKinds = []Kind{KindSpoofBurst, KindRobocall, KindOneRing, KindFan, Kind
 
 // LegitKinds — все легитимные типы.
 var LegitKinds = []Kind{KindRegular, KindHeavy, KindCallCenter, KindBankNotify, KindCourier, KindRoamer,
-	KindForeignCaller, KindCorpMulti, KindEmergency}
+	KindForeignCaller, KindCorpMulti, KindEmergency, KindNightWatch, KindUtilityBroadcast}
 
 // IsFraud сообщает, мошеннический ли тип.
 func (k Kind) IsFraud() bool {
@@ -91,6 +93,7 @@ type Config struct {
 
 	// Число абонентов по типам (0 → значение по умолчанию × Scale; отрицательное → 0).
 	Regular, Heavy, CallCenters, BankNotify, Couriers, Roamers, ForeignCallers, CorpMulti, Emergency int
+	NightWatch, UtilityBroadcast                                                                     int
 	SpoofBurst, Robocall, OneRing, FanGroups, SimFarms, ColdSpam                                     int
 	ImsiClones, ForwardChains, SimBoxes, Carousels                                                   int
 }
@@ -126,6 +129,8 @@ func (c *Config) defaults() {
 	set(&c.ForeignCallers, 100)
 	set(&c.CorpMulti, 3)
 	set(&c.Emergency, 150)
+	set(&c.NightWatch, 15)
+	set(&c.UtilityBroadcast, 5)
 	set(&c.SpoofBurst, 12)
 	set(&c.Robocall, 6)
 	set(&c.OneRing, 8)
@@ -182,6 +187,12 @@ func Generate(cfg Config) *Dataset {
 	}
 	for i := 0; i < cfg.Emergency; i++ {
 		g.emergency()
+	}
+	for i := 0; i < cfg.NightWatch; i++ {
+		g.nightWatch()
+	}
+	for i := 0; i < cfg.UtilityBroadcast; i++ {
+		g.utilityBroadcast()
 	}
 	for i := 0; i < cfg.SpoofBurst; i++ {
 		g.spoofBurst()
@@ -307,6 +318,39 @@ var diurnalCum = func() [24]float64 {
 	}
 	return c
 }()
+
+// nightDiurnal: вес часа суток для ночных смен (диспетчеры, охрана) — пик 22–6, около 60% вызовов ночью (D3).
+var nightDiurnal = [24]float64{9, 9, 9, 9, 9, 9, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 9, 9}
+var nightDiurnalCum = func() [24]float64 {
+	var c [24]float64
+	var s float64
+	for i, w := range nightDiurnal {
+		s += w
+		c[i] = s
+	}
+	return c
+}()
+
+func (g *gen) nightTime(day int) time.Time {
+	x := g.rng.Float64() * nightDiurnalCum[23]
+	h := 0
+	for h < 23 && nightDiurnalCum[h] < x {
+		h++
+	}
+	return g.cfg.Start.AddDate(0, 0, day).Add(time.Duration(h)*time.Hour + time.Duration(g.rng.IntN(3600))*time.Second)
+}
+
+// cityNumber подбирает номер из городского (не мобильного) диапазона — в отличие от g.number,
+// не гарантирующего тип соединения (нужно для D1/D5, где по условию кейса номер городской).
+func (g *gen) cityNumber(region uint16) string {
+	for i := 0; i < 30; i++ {
+		n := g.number(region)
+		if g.connType(n) == "fixed" {
+			return n
+		}
+	}
+	return g.number(region)
+}
 
 func (g *gen) humanTime(day int) time.Time {
 	x := g.rng.Float64() * diurnalCum[23]
@@ -529,6 +573,59 @@ func (g *gen) emergency() {
 	}
 }
 
+// nightWatch — D3, ночные диспетчеры и охрана: похоже на фрод долей ночных вызовов (60%), но есть
+// входящие, повторяющиеся контакты и нормальные длительности разговоров.
+func (g *gen) nightWatch() {
+	region := g.anyRegion()
+	caller := g.number(region)
+	list := g.contacts(g.intn(5, 12), region, 0.85)
+	for day := 0; day < g.cfg.Days; day++ {
+		for i, n := 0, g.intn(8, 20); i < n; i++ {
+			c := callrec.Call{Caller: caller, Callee: g.pick(list), StartedAt: g.nightTime(day), ConnType: g.connType(caller),
+				SrcCountry: "RU", SrcOperator: g.srcOperator(caller)}
+			if g.chance(0.85) {
+				c.DurationSec = g.durAnswered(60, 0.8)
+			}
+			g.add(KindNightWatch, c)
+		}
+		// входящие от тех же контактов: диспетчеру звонят, а не только он
+		for i, n := 0, g.intn(4, 12); i < n; i++ {
+			from := g.pick(list)
+			c := callrec.Call{Caller: from, Callee: caller, StartedAt: g.nightTime(day), ConnType: g.connType(from),
+				SrcCountry: "RU", SrcOperator: g.operatorOf(from)}
+			if g.chance(0.85) {
+				c.DurationSec = g.durAnswered(60, 0.8)
+			}
+			g.add(KindNightWatch, c)
+		}
+	}
+}
+
+// utilityBroadcast — D5, оповещение ЖКХ/МЧС: один городской номер обзванивает базу жителей за час;
+// номера B случайные (не последовательный диапазон, как у робозвонка S2), не каждый день — разовые волны.
+func (g *gen) utilityBroadcast() {
+	caller := g.cityNumber(g.anyRegion())
+	broadcastDay := g.rng.IntN(g.cfg.Days) // хотя бы одна волна гарантирована, остальные дни — вероятностно
+	for day := 0; day < g.cfg.Days; day++ {
+		if day != broadcastDay && !g.chance(0.4) {
+			continue
+		}
+		start := g.cfg.Start.AddDate(0, 0, day).Add(time.Duration(g.intn(8, 20)) * time.Hour)
+		n := g.intn(80, 300)
+		mean := 3600.0 / float64(n)
+		t := start
+		for i := 0; i < n; i++ {
+			t = t.Add(time.Duration(g.rng.ExpFloat64()*mean) * time.Second)
+			c := callrec.Call{Caller: caller, Callee: g.number(0), StartedAt: t, ConnType: "fixed",
+				SrcCountry: "RU", SrcOperator: g.srcOperator(caller)}
+			if g.chance(0.5) {
+				c.DurationSec = g.durAnswered(20, 0.6)
+			}
+			g.add(KindUtilityBroadcast, c)
+		}
+	}
+}
+
 // ---- мошенничество ----
 
 func (g *gen) randomTimeIn(from, to time.Time) time.Time {
@@ -569,8 +666,8 @@ func (g *gen) robocall() {
 			t = t.Add(time.Duration(gap*(0.95+g.rng.Float64()*0.1)) * time.Second)
 			c := callrec.Call{Caller: caller, Callee: g.number(0), StartedAt: t, ConnType: g.connType(caller),
 				SrcCountry: "RU", SrcOperator: g.operatorOf(caller)}
-			if g.chance(0.15) {
-				c.DurationSec = g.intn(1, 6)
+			if g.chance(0.75) { // по условию кейса (S2): длительность 4–25 с, лишь четверть — 0
+				c.DurationSec = g.intn(4, 25)
 			}
 			g.add(KindRobocall, c)
 		}

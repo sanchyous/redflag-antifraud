@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sanchyous/redflag-antifraud/internal/decision/decide"
 	"github.com/sanchyous/redflag-antifraud/internal/decision/mlclient"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/features"
 	"github.com/sanchyous/redflag-antifraud/internal/detection/protect"
@@ -326,6 +327,29 @@ func TestMLStageRecoversQuicklyAfterLateStart(t *testing.T) {
 	}
 	if e.MLVersion() != "cb-test" {
 		t.Fatal("the stage must activate within moments of the ML service coming up, not after a minute")
+	}
+}
+
+// TestFloorReasonNamesEverySignal — регрессия: floorReason раньше проверял только spoof/unallocated
+// и молча называл любой другой жёсткий сигнал (клон SIM, цепочка, SIM-box, карусель) «unallocated»,
+// что делало объяснение неверным для 4 из 6 правил decide.HardSignals.
+func TestFloorReasonNamesEverySignal(t *testing.T) {
+	cases := []struct {
+		sig  decide.Signals
+		want string
+	}{
+		{decide.SigSpoof, "rule_spoof"},
+		{decide.SigUnallocated, "rule_unallocated"},
+		{decide.SigSimClone, "rule_sim_clone"},
+		{decide.SigChain, "rule_chain"},
+		{decide.SigSimBox, "rule_sim_box"},
+		{decide.SigCarousel, "rule_carousel"},
+	}
+	for _, c := range cases {
+		r := floorReason(c.sig)
+		if r.Factor != c.want || r.Text == "" {
+			t.Errorf("floorReason(%v) = %q, want %q", c.sig, r.Factor, c.want)
+		}
 	}
 }
 

@@ -58,7 +58,7 @@ export function openEvent(e) {
     h('dt', {}, 'Сигналы'), h('dd', {}, (e.signals || []).length ? e.signals.map((s) => h('span', { class: 'chip hot' }, signalName(s))) : '—'),
     h('dt', {}, 'Задержка'), h('dd', {}, fmt.us(e.latency_us)),
     e.rule_floor ? h('dt', {}, 'Пол-правило') : null,
-    e.rule_floor ? h('dd', {}, 'Поднято правилом: подмена номера — не ниже «проверки».') : null,
+    e.rule_floor ? h('dd', {}, (reasons.find((r) => isRule(r.factor)) || {}).text || 'Вердикт поднят жёстким правилом независимо от модели.') : null,
     e.block_suppressed ? h('dt', {}, 'Защита') : null,
     e.block_suppressed ? h('dd', {}, 'Блок заменён проверкой: защитный класс.') : null);
   openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv,

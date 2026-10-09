@@ -276,7 +276,7 @@ nav { flex: 1; padding: 4px 12px; overflow-y: auto; }
 
 /* ============================================================================================
    ВИДЖЕТЫ (карточки, M3 elevated surface) */
-.grid { display: grid; gap: 16px; }
+.grid { display: grid; gap: 16px; align-items: start; }
 .cols-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

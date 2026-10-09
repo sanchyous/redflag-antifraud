@@ -15,8 +15,21 @@ LEGIT = [
     "foreign_caller",
     "corp_multi",
     "emergency",
+    "night_watch",
+    "utility_broadcast",
 ]
-FRAUD = ["spoof_burst", "robocall", "one_ring", "fan", "sim_farm", "cold_spam"]
+FRAUD = [
+    "spoof_burst",
+    "robocall",
+    "one_ring",
+    "fan",
+    "sim_farm",
+    "cold_spam",
+    "imsi_clone",
+    "forward_chain",
+    "sim_box",
+    "carousel",
+]
 
 
 def _pct(a: float, b: float) -> float:

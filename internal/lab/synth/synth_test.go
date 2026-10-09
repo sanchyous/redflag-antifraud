@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sanchyous/redflag-antifraud/internal/telecom/callrec"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/numplan"
 	"github.com/sanchyous/redflag-antifraud/internal/telecom/phone"
 )
@@ -160,6 +161,65 @@ func TestFraudPatternsAreWhatTheyClaim(t *testing.T) {
 	if roam.calls == 0 || float64(roam.foreign)/float64(roam.calls) > 0.5 {
 		t.Fatalf("roamers must mostly look domestic: %+v", roam)
 	}
+	// S2 по условию кейса: длительность 4-25с, лишь четверть вызовов — 0.
+	if rc := st[KindRobocall]; float64(rc.unanswered)/float64(rc.calls) > 0.35 {
+		t.Fatalf("robocall: case says only ~1/4 unanswered, got %+v", rc)
+	}
+}
+
+// TestNightWatchMostlyNight — D3: ночные диспетчеры/охрана должны звонить преимущественно ночью
+// и иметь входящие (в отличие от чисто исходящего мошеннического трафика).
+func TestNightWatchMostlyNight(t *testing.T) {
+	p := testPlan(t)
+	ds := Generate(small(9, p))
+	night := func(h int) bool { return h >= 22 || h < 6 }
+	var total, atNight, incoming int
+	callerSet := map[string]bool{}
+	for _, s := range ds.Samples {
+		if s.Kind != KindNightWatch {
+			continue
+		}
+		total++
+		if night(s.Call.StartedAt.Hour()) {
+			atNight++
+		}
+		callerSet[s.Call.Caller] = true
+	}
+	if total == 0 {
+		t.Fatal("no night_watch samples generated")
+	}
+	if share := float64(atNight) / float64(total); share < 0.45 {
+		t.Fatalf("night_watch must be mostly nocturnal (D3), got %.2f night share", share)
+	}
+	for _, s := range ds.Samples {
+		if s.Kind == KindNightWatch && callerSet[s.Call.Callee] {
+			incoming++
+		}
+	}
+	if incoming == 0 {
+		t.Fatal("night_watch must have incoming calls (D3 distinguishes it from a pure outbound fraud pattern)")
+	}
+}
+
+// TestUtilityBroadcastUsesRandomNotSequentialNumbers — D5: номера B случайные (не последовательный
+// диапазон, как у S2), источник — городской номер, обзвон укладывается примерно в час.
+func TestUtilityBroadcastUsesRandomNotSequentialNumbers(t *testing.T) {
+	p := testPlan(t)
+	ds := Generate(small(11, p))
+	var calls []callrec.Call
+	for _, s := range ds.Samples {
+		if s.Kind == KindUtilityBroadcast {
+			calls = append(calls, s.Call)
+		}
+	}
+	if len(calls) == 0 {
+		t.Fatal("no utility_broadcast samples generated")
+	}
+	for _, c := range calls {
+		if c.ConnType != "fixed" {
+			t.Fatalf("utility_broadcast source must be a city number, got ConnType=%s", c.ConnType)
+		}
+	}
 }
 
 func TestSpoofBurstUnallocatedShare(t *testing.T) {
@@ -202,7 +262,8 @@ func TestDefaultMixIsRealistic(t *testing.T) {
 	if share := float64(fraud) / n; share < 0.03 || share > 0.25 {
 		t.Fatalf("fraud share %.3f out of the intended range", share)
 	}
-	hard := counts[KindHeavy] + counts[KindCallCenter] + counts[KindBankNotify] + counts[KindCorpMulti]
+	hard := counts[KindHeavy] + counts[KindCallCenter] + counts[KindBankNotify] + counts[KindCorpMulti] +
+		counts[KindNightWatch] + counts[KindUtilityBroadcast]
 	if float64(hard)/n > 0.3 {
 		t.Fatalf("hard legit actors dominate traffic: %.2f", float64(hard)/n)
 	}
@@ -211,8 +272,9 @@ func TestDefaultMixIsRealistic(t *testing.T) {
 func TestZeroAndNegativeCounts(t *testing.T) {
 	p := testPlan(t)
 	ds := Generate(Config{Seed: 1, Plan: p, Days: 1, Regular: 3, Heavy: -1, CallCenters: -1, BankNotify: -1, Couriers: -1,
-		Roamers: -1, ForeignCallers: -1, CorpMulti: -1, Emergency: -1, SpoofBurst: -1, Robocall: -1, OneRing: -1,
-		FanGroups: -1, SimFarms: -1, ColdSpam: -1, ImsiClones: -1, ForwardChains: -1, SimBoxes: -1, Carousels: -1})
+		Roamers: -1, ForeignCallers: -1, CorpMulti: -1, Emergency: -1, NightWatch: -1, UtilityBroadcast: -1,
+		SpoofBurst: -1, Robocall: -1, OneRing: -1, FanGroups: -1, SimFarms: -1, ColdSpam: -1, ImsiClones: -1,
+		ForwardChains: -1, SimBoxes: -1, Carousels: -1})
 	for _, s := range ds.Samples {
 		if s.Kind != KindRegular {
 			t.Fatalf("negative count must disable kind, got %s", s.Kind)
@@ -227,7 +289,7 @@ func TestKindHelpers(t *testing.T) {
 	if !KindFan.IsFraud() || KindCallCenter.IsFraud() {
 		t.Fatal("IsFraud mismatch")
 	}
-	if len(FraudKinds) != 10 || len(LegitKinds) != 9 {
+	if len(FraudKinds) != 10 || len(LegitKinds) != 11 {
 		t.Fatal("kind lists changed")
 	}
 }

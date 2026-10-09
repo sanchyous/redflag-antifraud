@@ -589,12 +589,27 @@ func (e *Engine) MLVersion() string {
 	return ""
 }
 
-// floorReason описывает жёсткое правило, поднявшее вердикт до review.
+// floorReason описывает жёсткое правило, поднявшее вердикт до review. Вызывается только когда
+// d.Floored, то есть sig содержит хотя бы один бит decide.HardSignals — switch покрывает их все.
 func floorReason(sig decide.Signals) explain.Reason {
-	if sig&decide.SigSpoof != 0 {
+	switch {
+	case sig&decide.SigSpoof != 0:
 		return explain.Reason{Factor: "rule_spoof", Value: 1, Effect: "raises",
 			Text: "правило: российский номер при иностранном входе (подмена номера) — не ниже review независимо от модели"}
+	case sig&decide.SigUnallocated != 0:
+		return explain.Reason{Factor: "rule_unallocated", Value: 1, Effect: "raises",
+			Text: "правило: номер вызывающего из нераспределённого диапазона — не ниже review независимо от модели"}
+	case sig&decide.SigSimClone != 0:
+		return explain.Reason{Factor: "rule_sim_clone", Value: 1, Effect: "raises",
+			Text: "правило: на номере несколько разных IMSI (клон SIM) — не ниже review независимо от модели"}
+	case sig&decide.SigChain != 0:
+		return explain.Reason{Factor: "rule_chain", Value: 1, Effect: "raises",
+			Text: "правило: номер — звено цепочки переадресации — не ниже review независимо от модели"}
+	case sig&decide.SigSimBox != 0:
+		return explain.Reason{Factor: "rule_sim_box", Value: 1, Effect: "raises",
+			Text: "правило: признаки SIM-box (только исходящие, новый собеседник раз за разом, входящих нет) — не ниже review независимо от модели"}
+	default: // sig&decide.SigCarousel != 0 — последний бит decide.HardSignals
+		return explain.Reason{Factor: "rule_carousel", Value: 1, Effect: "raises",
+			Text: "правило: номер входит в закрытую группу-карусель — не ниже review независимо от модели"}
 	}
-	return explain.Reason{Factor: "rule_unallocated", Value: 1, Effect: "raises",
-		Text: "правило: номер вызывающего из нераспределённого диапазона — не ниже review независимо от модели"}
 }
