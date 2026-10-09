@@ -132,8 +132,8 @@ func (c *Config) defaults() {
 	set(&c.FanGroups, 3)
 	set(&c.SimFarms, 4)
 	set(&c.ColdSpam, 60)
-	set(&c.ImsiClones, 3)
-	set(&c.ForwardChains, 5)
+	set(&c.ImsiClones, 10)
+	set(&c.ForwardChains, 40)
 	set(&c.SimBoxes, 2)
 	set(&c.Carousels, 2)
 }
