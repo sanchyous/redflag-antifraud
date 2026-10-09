@@ -51,6 +51,18 @@ class Targets:
     min_signals: int = 2
     gate_recall: float = 0.995
     max_ml_share: float = 0.30  # верхний предел доли трафика, уходящей в ML (нагрузка на Python-сервис)
+    # Порог review подбирается квантилем на калибровочной выборке, а измеряется потом на отдельной
+    # тестовой — и это два разных набора. С добавлением редких трудных легитимных типов (например,
+    # ADR-0019: night_watch/utility_broadcast по ~0,5-0,7% обучающей выборки) разброс между ними
+    # перестал быть пренебрежимым: прогон 2026-10-09 целился в 1% review_fpr, а тестовый набор
+    # показал 1,69% — квантиль редкого трудного класса на калибровке не обязан совпадать с его же
+    # квантилем на тесте при таком небольшом числе примеров. review_margin закладывает запас на этот
+    # разрыв: бюджет FPR на калибровке считается строже номинального target в 1/review_margin раз,
+    # так что рост на тесте до него не доходит. 0,6 — не точная наука, а консервативная оценка по
+    # единственному пока наблюдению (во столько раз FPR тогда и вырос); при будущих переобучениях
+    # стоит сверять фактический test-FPR с review_fpr и поправлять margin, если разрыв систематически
+    # другой — см. docs/ml.md.
+    review_margin: float = 0.6
 
 
 def fit_thresholds(scores: np.ndarray, df: pd.DataFrame, t: Targets) -> tuple[float, float]:
@@ -62,7 +74,8 @@ def fit_thresholds(scores: np.ndarray, df: pd.DataFrame, t: Targets) -> tuple[fl
     # Жёсткое правило само отмечает часть легитимных вызовов; они расходуют бюджет FPR, поэтому для порога
     # модели остаётся меньше. Считаем их по всем таким вызовам (консервативно).
     hard = hard_mask(df)
-    budget = max(math.floor(t.review_fpr * n_legit) - int((legit & hard).sum()), 0)
+    target_fpr = t.review_fpr * t.review_margin
+    budget = max(math.floor(target_fpr * n_legit) - int((legit & hard).sum()), 0)
     review = quantile_above(scores[legit & ~hard], budget)
     review = max(review, 0.001)
     blockable = legit & (popcount(df["signals"].to_numpy()) >= t.min_signals) & (df["class"].to_numpy() == 0)
