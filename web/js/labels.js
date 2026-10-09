@@ -27,6 +27,11 @@ const FACTORS = {
   caller_invalid: 'Скрытый номер',
   in_calls_1h: 'Нагрузка на получателя',
   in_peers_24h: 'Разные звонящие получателю',
+  imsi_count: 'Лишние IMSI на номере',
+  chain_member: 'Цепочка переадресации',
+  chain_depth: 'Глубина цепочки',
+  simbox_member: 'Признак SIM-box',
+  carousel_member: 'Карусель (закрытая группа)',
   rule_spoof: 'Правило: подмена номера',
   rule_unallocated: 'Правило: номер вне диапазонов',
 };
@@ -39,6 +44,10 @@ const SIGNALS = {
   region_sweep: 'обзвон регионов',
   sim_farm: 'ферма SIM',
   robot: 'робот',
+  sim_clone: 'клон SIM',
+  forward_chain: 'цепочка переадресации',
+  sim_box: 'SIM-box',
+  carousel: 'карусель',
 };
 
 export const factorName = (f) => FACTORS[f] || f;
@@ -64,8 +73,12 @@ const KINDS = {
   fan: 'Веер номеров',
   sim_farm: 'SIM-ферма',
   cold_spam: 'Холодный спам',
+  imsi_clone: 'Клон SIM (лишние IMSI)',
+  forward_chain: 'Цепочка переадресации',
+  sim_box: 'SIM-box',
+  carousel: 'Карусель (закрытая группа)',
 };
 
 export const LEGIT_KINDS = ['regular', 'heavy_user', 'call_center', 'bank_notify', 'courier', 'roamer', 'foreign_caller', 'corp_multi'];
-export const FRAUD_KINDS = ['spoof_burst', 'robocall', 'one_ring', 'fan', 'sim_farm', 'cold_spam'];
+export const FRAUD_KINDS = ['spoof_burst', 'robocall', 'one_ring', 'fan', 'sim_farm', 'cold_spam', 'imsi_clone', 'forward_chain', 'sim_box', 'carousel'];
 export const kindName = (k) => KINDS[k] || k;
