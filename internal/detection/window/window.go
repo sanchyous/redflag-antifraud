@@ -411,6 +411,19 @@ type Profile struct {
 // не менее minCalls исходящих. Снимок делается по шардам под локом каждого и
 // копирует данные, поэтому вызывать нужно нечасто (раз в десятки секунд).
 func (s *Store) Profiles(now int64, span uint32, minCalls int) []Profile {
+	return s.profiles(now, span, minCalls, false)
+}
+
+// ProfilesAllDirections — как Profiles, но считает вызовы и собеседников по обеим сторонам
+// (исходящие и входящие вместе), а не только исходящие. Нужен детекторам, где пассивный
+// участник (в основном отвечает, сам звонит редко) должен быть виден наравне с активным —
+// иначе он не набирает minCalls по одним исходящим и не попадает в кандидаты вовсе
+// (так было с каруселью, см. CarouselConfig.MaxLeak).
+func (s *Store) ProfilesAllDirections(now int64, span uint32, minCalls int) []Profile {
+	return s.profiles(now, span, minCalls, true)
+}
+
+func (s *Store) profiles(now int64, span uint32, minCalls int, bothWays bool) []Profile {
 	cur := clampTS(now)
 	var out []Profile
 	var tsBuf []uint32
@@ -426,7 +439,7 @@ func (s *Store) Profiles(now int64, span uint32, minCalls int) []Profile {
 			var peers []uint64
 			for j := range st.ents {
 				e := &st.ents[j]
-				if e.flags&fOut == 0 || e.ts > cur || cur-e.ts >= span {
+				if (!bothWays && e.flags&fOut == 0) || e.ts > cur || cur-e.ts >= span {
 					continue
 				}
 				calls++

@@ -288,3 +288,24 @@ func TestProfiles(t *testing.T) {
 		t.Fatalf("profile = %+v", p)
 	}
 }
+
+// TestProfilesAllDirectionsCountsInbound — регрессия для карусели: номер 99 только отвечает
+// (никогда не звонит сам) и поэтому не набирает minCalls по исходящим — Profiles() его не видит,
+// а ProfilesAllDirections() обязан, иначе пассивный участник карусели не попадёт в кандидаты.
+func TestProfilesAllDirectionsCountsInbound(t *testing.T) {
+	s := New(Config{})
+	for i := 0; i < 12; i++ { // номер 99 — только получатель, 12 разных звонящих
+		s.Observe(ev(uint64(100+i), 99, t0+int64(i*10), 5, true, 0, 0))
+	}
+	if ps := s.Profiles(t0+200, 3600, 10); len(ps) != 0 {
+		t.Fatalf("Profiles must not see a purely-inbound number: %+v", ps)
+	}
+	ps := s.ProfilesAllDirections(t0+200, 3600, 10)
+	if len(ps) != 1 || ps[0].Key != 99 {
+		t.Fatalf("ProfilesAllDirections = %+v, want one profile for key 99", ps)
+	}
+	p := ps[0]
+	if p.Calls != 12 || len(p.Peers) != 12 {
+		t.Fatalf("profile = %+v", p)
+	}
+}

@@ -463,9 +463,13 @@ func (e *Engine) RefreshSimBox() *graph.SimBoxIndex {
 	return ix
 }
 
-// RefreshCarousel пересчитывает индекс карусели по снимку профилей окон.
+// RefreshCarousel пересчитывает индекс карусели по снимку профилей окон. В отличие от веера
+// и SIM-box, берёт профили по обеим сторонам (ProfilesAllDirections): карусель симметрична по
+// конструкции (её участники звонят друг другу), и участник, который внутри группы в основном
+// отвечает, а сам звонит редко, иначе не набирает minCalls по одним исходящим и считается
+// активным соседям «утечкой», хотя на деле часть той же группы.
 func (e *Engine) RefreshCarousel() *graph.CarouselIndex {
-	profiles := e.win.Profiles(e.now().Unix(), e.cfg.CarouselSpan, e.cfg.Carousel.MinCallsOrDefault())
+	profiles := e.win.ProfilesAllDirections(e.now().Unix(), e.cfg.CarouselSpan, e.cfg.Carousel.MinCallsOrDefault())
 	ix := graph.AnalyzeCarousel(profiles, e.cfg.Carousel)
 	prev := e.carsl.Index()
 	e.carsl.Store(ix)

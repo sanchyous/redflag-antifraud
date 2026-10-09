@@ -428,6 +428,43 @@ func TestCarouselSignal(t *testing.T) {
 	}
 }
 
+// TestCarouselSignalIncludesPassiveMembers — регрессия для ранее известного ограничения
+// (CarouselConfig.MaxLeak): участники карусели, которые в основном отвечают и сами звонят
+// редко, раньше не набирали MinCalls по одним исходящим и не попадали в индекс вовсе.
+// RefreshCarousel теперь строит кандидатов по обеим сторонам (ProfilesAllDirections), и
+// пассивный участник должен быть виден наравне с активными.
+func TestCarouselSignalIncludesPassiveMembers(t *testing.T) {
+	e, clk := newEngine(t, func(c *Config) { c.ExplainAlways = true })
+	active := []string{"+7 916 701-00-01", "+7 916 701-00-02", "+7 916 701-00-03", "+7 916 701-00-04", "+7 916 701-00-05"}
+	passive := []string{"+7 916 701-00-06", "+7 916 701-00-07"}
+	all := append(append([]string{}, active...), passive...)
+	id := 0
+	for round := 0; round < 30; round++ { // активные звонят всем в группе, включая молчунов
+		for _, a := range active {
+			for _, b := range all {
+				if a == b {
+					continue
+				}
+				e.Score(call(fmt.Sprintf("car-p-%d", id), a, b, clk.Now(), 20))
+				id++
+			}
+		}
+		clk.Advance(10)
+	}
+	ix := e.RefreshCarousel()
+	if ix.Members() != 7 {
+		t.Fatalf("carousel members = %d, want 7 (5 active + 2 passive)", ix.Members())
+	}
+	// Молчун наконец звонит сам — проверяем, что живой скоринг тоже видит его членство.
+	r, _ := e.Score(call("car-p-next", passive[0], active[0], clk.Now(), 20))
+	if !hasFactor(r, "carousel_member") {
+		t.Fatalf("passive member's own call must be explained by carousel membership: %+v", r)
+	}
+	if !containsSignal(r, "carousel") {
+		t.Fatalf("signals = %v", r.Signals)
+	}
+}
+
 func containsSignal(r Response, name string) bool {
 	for _, s := range r.Signals {
 		if s == name {

@@ -29,14 +29,15 @@ import (
 
 func main() {
 	var (
-		numplanDir = flag.String("numplan", os.Getenv("NUMPLAN_DIR"), "каталог с CSV реестра Россвязи")
-		in         = flag.String("in", "", "файл вызовов (.csv, .jsonl)")
-		out        = flag.String("out", "decisions.csv", "куда записать решения (CSV)")
-		modelFile  = flag.String("model", "", "линейная модель стадии 1 (JSON); пусто — экспертная")
-		allowFile  = flag.String("allowlist", "", "файл allowlist проверенных номеров")
-		mlURL      = flag.String("ml-url", "", "адрес ML-сервиса; пусто — только линейная стадия")
-		mlKey      = flag.String("ml-key", os.Getenv("ML_API_KEY"), "ключ ML-сервиса")
-		fanEvery   = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать графовые индексы (веер, цепочки, SIM-box, карусель)")
+		numplanDir = flag.String("numplan", os.Getenv("NUMPLAN_DIR"), "каталог с CSV реестра Россвязи; задавайте только для реальных российских номеров — "+
+			"на файле с другой или вымышленной нумерацией почти каждый номер не найдётся в справочнике и получит ложный сигнал unallocated_caller")
+		in        = flag.String("in", "", "файл вызовов (.csv, .jsonl)")
+		out       = flag.String("out", "decisions.csv", "куда записать решения (CSV)")
+		modelFile = flag.String("model", "", "линейная модель стадии 1 (JSON); пусто — экспертная")
+		allowFile = flag.String("allowlist", "", "файл allowlist проверенных номеров")
+		mlURL     = flag.String("ml-url", "", "адрес ML-сервиса; пусто — только линейная стадия")
+		mlKey     = flag.String("ml-key", os.Getenv("ML_API_KEY"), "ключ ML-сервиса")
+		fanEvery  = flag.Duration("fan-every", 10*time.Minute, "как часто в модельном времени пересчитывать графовые индексы (веер, цепочки, SIM-box, карусель)")
 	)
 	flag.Parse()
 	if *in == "" {
