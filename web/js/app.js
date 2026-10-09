@@ -16,8 +16,8 @@ const ROUTES = [
   { path: 'problems', title: 'Проблемы', icon: 'problems', group: 'Мониторинг', view: problems, badge: true, live: true },
   { path: 'components', title: 'Компоненты', icon: 'components', group: 'Мониторинг', view: components, live: true },
   { path: 'graph', title: 'Граф связей', icon: 'graph', group: 'Аналитика', view: graph, live: true },
-  { path: 'ml', title: 'ML-модель', icon: 'ml', group: 'Аналитика', view: mlView, live: true },
-  { path: 'model', title: 'Модель', icon: 'model', group: 'Аналитика', view: model },
+  { path: 'ml', title: 'Качество модели', icon: 'ml', group: 'Аналитика', view: mlView, live: true },
+  { path: 'model', title: 'Веса и пороги', icon: 'model', group: 'Аналитика', view: model },
   { path: 'playground', title: 'Проверка вызова', icon: 'play', group: 'Инструменты', view: playground },
 ];
 

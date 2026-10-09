@@ -410,7 +410,7 @@ svg.graph text { font-size: 10px; fill: var(--on-surface-variant); }
 .carousel-group { padding: 10px 0; border-bottom: 1px solid var(--outline-variant); }
 .carousel-group:last-child { border-bottom: 0; }
 
-/* ---- раздел «ML-модель» ---- */
+/* ---- раздел «Качество модели» ---- */
 .flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
 .flow-box { flex: 1 1 150px; min-width: 150px; padding: 12px 14px; border-radius: var(--shape-sm); background: var(--surface-container); font-size: 12px; }
 .flow-box b { display: block; font-size: 13px; margin-bottom: 4px; font-weight: 600; }

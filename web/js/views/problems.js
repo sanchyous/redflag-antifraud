@@ -2,19 +2,33 @@
 // разбор: факторы с вкладом в решение (то самое «объяснение», которого требует ТЗ).
 
 import { openAct } from '../act.js';
-import { getEvents } from '../api.js';
+import { getEvents, getStatus } from '../api.js';
 import { factorName, isRule, signalName } from '../labels.js';
 import { fmt, h, openDrawer, sevBadge, toast, widget } from '../ui.js';
 
 const STRONG = new Set(['spoof', 'unallocated_caller', 'fan']);
 
-/** Таблица событий. compact — без столбца стадии и времени в полном виде. */
-export function eventTable(items, { compact = false } = {}) {
+/** Пороги решения для стадии события — чтобы показать score не абстрактным числом,
+ * а на фоне границы, которую он пересёк (или не пересёк). thresholds — { stage1: {review,block}, ml: {review,block} }. */
+function stageThresholds(e, thresholds) {
+  if (!thresholds) return null;
+  return e.stage === 'ml' ? thresholds.ml : thresholds.stage1;
+}
+
+function scoreWithThreshold(e, thresholds) {
+  const t = stageThresholds(e, thresholds);
+  if (!t) return e.score.toFixed(4);
+  const near = e.decision === 'block' ? t.block : t.review;
+  return `${e.score.toFixed(4)} (порог ${e.decision === 'block' ? 'блока' : 'проверки'} ${near.toFixed(4)})`;
+}
+
+/** Таблица событий. compact — без столбца стадии и времени в полном виде. thresholds — см. scoreWithThreshold. */
+export function eventTable(items, { compact = false, thresholds } = {}) {
   const head = h('tr', {}, h('th', {}, 'Время'), h('th', {}, 'Серьёзность'), h('th', {}, 'Вызов'), h('th', {}, 'Причина'),
     h('th', { class: 'num' }, 'Score'), compact ? null : h('th', {}, 'Стадия'), compact ? null : h('th', {}, 'Сигналы'));
   const rows = items.map((e) => {
     const top = (e.reasons || []).find((r) => r.effect === 'raises');
-    return h('tr', { class: 'row', onclick: () => openEvent(e) },
+    return h('tr', { class: 'row', onclick: () => openEvent(e, thresholds) },
       h('td', { class: 'muted', title: fmt.dateTime(e.time) }, compact ? fmt.ago(e.time) : fmt.dateTime(e.time)),
       h('td', {}, sevBadge(e.decision)),
       h('td', {}, h('div', { class: 'mono' }, `${e.caller} → ${e.callee}`), h('div', { class: 'muted', style: 'font-size:12px' }, regionLine(e))),
@@ -33,7 +47,7 @@ function regionLine(e) {
 }
 
 /** Панель разбора: решение, сигналы и вклад каждого фактора (полоса вправо — повышает риск, влево — снижает). */
-export function openEvent(e) {
+export function openEvent(e, thresholds) {
   const reasons = e.reasons || [];
   const maxAbs = Math.max(0.01, ...reasons.map((r) => Math.abs(r.contribution)));
   const contrib = h('div', {}, reasons.map((r) => {
@@ -49,8 +63,8 @@ export function openEvent(e) {
   }));
   const kv = h('dl', { class: 'kv' },
     h('dt', {}, 'Решение'), h('dd', {}, sevBadge(e.decision)),
-    h('dt', {}, 'Score'), h('dd', {}, e.score.toFixed(4)),
-    h('dt', {}, 'Стадия'), h('dd', {}, e.stage === 'ml' ? 'ML (CatBoost)' : 'линейная модель'),
+    h('dt', {}, 'Score'), h('dd', {}, scoreWithThreshold(e, thresholds)),
+    h('dt', {}, 'Стадия'), h('dd', {}, e.stage === 'ml' ? 'ML (CatBoost) — вклад факторов посчитан SHAP, не точной формулой' : 'линейная модель — вклад факторов посчитан точно'),
     h('dt', {}, 'Вызов'), h('dd', { class: 'mono' }, `${e.caller} → ${e.callee}`),
     h('dt', {}, 'Регионы'), h('dd', {}, regionLine(e)),
     h('dt', {}, 'Идентификатор'), h('dd', { class: 'mono' }, e.call_id),
@@ -69,12 +83,13 @@ export function openEvent(e) {
 
 export async function render(root, ctx) {
   const filter = ctx.problemsFilter || '';
-  const data = await getEvents(100, filter);
+  const [data, status] = await Promise.all([getEvents(100, filter), getStatus()]);
+  const thresholds = { stage1: status.engine.stage1, ml: status.engine.ml };
   const btn = (value, label) => h('button', {
     class: 'btn small' + (filter === value ? '' : ' ghost'), style: 'margin-right:6px',
     onclick: () => { ctx.problemsFilter = value; ctx.rerender(); },
   }, label);
   root.replaceChildren(widget('Рискованные вызовы',
-    data.items.length ? eventTable(data.items) : h('div', { class: 'empty' }, 'Рискованных вызовов нет'),
+    data.items.length ? eventTable(data.items, { thresholds }) : h('div', { class: 'empty' }, 'Рискованных вызовов нет'),
     { sub: h('span', {}, btn('', 'все'), btn('block', 'блокировки'), btn('review', 'проверки')), flush: true }));
 }

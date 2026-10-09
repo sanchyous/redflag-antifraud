@@ -62,7 +62,8 @@ export async function render(root, ctx) {
 
   const health = widget('Состояние компонентов', statusList(componentStatuses(status)), { sub: `версия ${status.service.version}` });
 
-  const problems = widget('Последние проблемы', events.items.length ? eventTable(events.items, { compact: true }) : h('div', { class: 'empty' }, 'Рискованных вызовов пока нет'),
+  const thresholds = { stage1: status.engine.stage1, ml: status.engine.ml };
+  const problems = widget('Последние проблемы', events.items.length ? eventTable(events.items, { compact: true, thresholds }) : h('div', { class: 'empty' }, 'Рискованных вызовов пока нет'),
     { sub: h('a', { href: '#/problems' }, 'все →'), flush: true, cls: 'span-2' });
 
   root.replaceChildren(
