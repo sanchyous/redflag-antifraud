@@ -6,6 +6,7 @@ jobs:
   push-model:
     runs-on: [self-hosted, redflag]
     steps:
+      - uses: actions/checkout@v4
       - name: Pull trained model from training host and restart
         run: |
           set -euo pipefail
@@ -27,7 +28,7 @@ jobs:
           mv /home/deploy/redflag/models/current.new /home/deploy/redflag/models/current
 
           rm -rf /tmp/model-push-key
-          cd /home/deploy/redflag && docker compose --env-file /home/deploy/redflag/.env up -d --force-recreate app ml
+          docker compose --env-file /home/deploy/redflag/.env up -d --force-recreate app ml
 
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/health; then exit 0; fi
