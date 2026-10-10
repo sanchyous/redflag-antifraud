@@ -84,7 +84,7 @@ async function render(force = false) {
   document.querySelectorAll('.nav-item').forEach((a) => a.classList.toggle('active', a.dataset.path === route.path));
   $('page-title').textContent = route.title;
   document.title = `${route.title} — RedFlag`;
-  $('range').style.display = route.path === 'dashboard' ? '' : 'none';
+  $('range').style.display = route.path === 'dashboard' || route.path === 'problems' ? '' : 'none';
   try {
     const box = document.createElement('div');
     await route.view.render(box, ctx);

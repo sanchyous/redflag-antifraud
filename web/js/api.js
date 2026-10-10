@@ -40,6 +40,8 @@ export async function api(path, { method = 'GET', body, timeout = 8000 } = {}) {
 export const getStatus = () => api('/v1/status');
 export const getStats = (windowSec, points) => api(`/v1/stats?window=${windowSec}&points=${points}`);
 export const getEvents = (limit = 50, decision = '') => api(`/v1/events?limit=${limit}${decision ? '&decision=' + decision : ''}`);
+// Общий пул решений из журнала Postgres (включая allow, не только проверка/блок) — выборочно, не весь поток.
+export const getRecent = (limit = 50, decision = '') => api(`/v1/calls/recent?limit=${limit}${decision ? '&decision=' + decision : ''}`);
 export const getModel = () => api('/v1/model');
 export const getFans = () => api('/v1/graph/fans');
 export const getChains = () => api('/v1/graph/chains');

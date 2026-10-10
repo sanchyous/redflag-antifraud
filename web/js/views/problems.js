@@ -1,12 +1,15 @@
-// «Проблемы» — рискованные решения (проверка и блок), по аналогии с Problems в Zabbix. Клик по строке открывает
-// разбор: факторы с вкладом в решение (то самое «объяснение», которого требует ТЗ).
+// «Проблемы» — рискованные решения (проверка и блок) в контексте общего пула вызовов: не просто
+// список инцидентов, а сколько их было относительно всего трафика, и как это распределено во времени.
+// Клик по строке открывает разбор: факторы с вкладом в решение (объяснение, которого требует ТЗ).
 
 import { openAct } from '../act.js';
-import { getEvents, getStatus } from '../api.js';
+import { getEvents, getRecent, getStats, getStatus } from '../api.js';
+import { stackedBars } from '../charts.js';
 import { factorName, isRule, signalName } from '../labels.js';
-import { fmt, h, openDrawer, sevBadge, toast, widget } from '../ui.js';
+import { fmt, h, openDrawer, sevBadge, tile, toast, widget } from '../ui.js';
 
 const STRONG = new Set(['spoof', 'unallocated_caller', 'fan']);
+const COLORS = { allow: 'var(--c-good)', review: 'var(--c-review)', block: 'var(--c-block)' };
 
 /** Пороги решения для стадии события — чтобы показать score не абстрактным числом,
  * а на фоне границы, которую он пересёк (или не пересёк). thresholds — { stage1: {review,block}, ml: {review,block} }. */
@@ -20,6 +23,14 @@ function scoreWithThreshold(e, thresholds) {
   if (!t) return e.score.toFixed(4);
   const near = e.decision === 'block' ? t.block : t.review;
   return `${e.score.toFixed(4)} (порог ${e.decision === 'block' ? 'блока' : 'проверки'} ${near.toFixed(4)})`;
+}
+
+/** Содержит ли вызов искомые цифры номера (звонящий или получатель). */
+function matchesQuery(e, query) {
+  const digits = query.replace(/\D/g, '');
+  if (!digits) return true;
+  const strip = (s) => (s || '').replace(/\D/g, '');
+  return strip(e.caller).includes(digits) || strip(e.callee).includes(digits);
 }
 
 /** Таблица событий. compact — без столбца стадии и времени в полном виде. thresholds — см. scoreWithThreshold. */
@@ -36,6 +47,24 @@ export function eventTable(items, { compact = false, thresholds } = {}) {
       h('td', { class: 'num' }, e.score.toFixed(4)),
       compact ? null : h('td', {}, e.stage === 'ml' ? 'ML' : 'линейная'),
       compact ? null : h('td', {}, (e.signals || []).map((s) => h('span', { class: 'chip' + (STRONG.has(s) ? ' hot' : '') }, signalName(s)))));
+  });
+  return h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, head), h('tbody', {}, rows)));
+}
+
+/** Таблица общего пула из журнала Postgres: схема беднее, чем у /v1/events (нет стадии, регионов,
+ * сводки) — решения там не только рискованные, allow попадает выборочно, не весь поток. */
+function recentTable(items) {
+  const head = h('tr', {}, h('th', {}, 'Время'), h('th', {}, 'Серьёзность'), h('th', {}, 'Вызов'), h('th', {}, 'Причина'), h('th', { class: 'num' }, 'Score'));
+  const rows = items.map((e) => {
+    let reasons = [];
+    try { reasons = JSON.parse(e.reasons || '[]'); } catch { /* журнал мог сохранить пустое значение */ }
+    const top = reasons.find((r) => r.effect === 'raises');
+    return h('tr', { class: 'row' },
+      h('td', { class: 'muted', title: fmt.dateTime(e.created_at) }, fmt.ago(e.created_at)),
+      h('td', {}, sevBadge(e.decision)),
+      h('td', { class: 'mono' }, `${e.caller} → ${e.callee}`),
+      h('td', {}, top ? top.text : '—'),
+      h('td', { class: 'num' }, e.score.toFixed(4)));
   });
   return h('div', { class: 'table-wrap' }, h('table', {}, h('thead', {}, head), h('tbody', {}, rows)));
 }
@@ -83,13 +112,62 @@ export function openEvent(e, thresholds) {
 
 export async function render(root, ctx) {
   const filter = ctx.problemsFilter || '';
-  const [data, status] = await Promise.all([getEvents(100, filter), getStatus()]);
+  const tab = ctx.problemsTab || 'problems';
+  const query = ctx.problemsQuery || '';
+  const points = 60;
+  const [data, status, stats] = await Promise.all([getEvents(200, filter), getStatus(), getStats(ctx.windowSec, points)]);
   const thresholds = { stage1: status.engine.stage1, ml: status.engine.ml };
-  const btn = (value, label) => h('button', {
+  const t = stats.totals;
+  const total = t.total || 0;
+
+  // Общий пул: не только список проблем, а их доля от всего, что прошло через систему за то же окно.
+  const summary = h('div', { class: 'grid cols-4' },
+    tile(`Всего за ${ctx.windowLabel}`, fmt.int(total), 'общий пул вызовов', 'info'),
+    tile('Проверка', fmt.int(t.review), total ? fmt.pct(t.review / total, 2) : '—', t.review ? 'avg' : 'ok'),
+    tile('Блок', fmt.int(t.block), total ? fmt.pct(t.block / total, 2) : '—', t.block ? 'high' : 'ok'),
+    tile('Пропущено', fmt.int(t.allow), total ? fmt.pct(t.allow / total, 1) : '—', ''));
+
+  const trend = widget('Решения по времени', stackedBars(stats.points, [
+    { key: 'allow', color: COLORS.allow, label: 'Пропуск' }, { key: 'review', color: COLORS.review, label: 'Проверка' }, { key: 'block', color: COLORS.block, label: 'Блок' },
+  ]), { sub: `шаг ${stats.step_sec} с` });
+
+  const tabBtn = (value, label) => h('button', {
+    class: 'btn small' + (tab === value ? '' : ' ghost'), style: 'margin-right:6px',
+    onclick: () => { ctx.problemsTab = value; ctx.rerender(); },
+  }, label);
+  const filterBtn = (value, label) => h('button', {
     class: 'btn small' + (filter === value ? '' : ' ghost'), style: 'margin-right:6px',
     onclick: () => { ctx.problemsFilter = value; ctx.rerender(); },
   }, label);
-  root.replaceChildren(widget('Рискованные вызовы',
-    data.items.length ? eventTable(data.items, { thresholds }) : h('div', { class: 'empty' }, 'Рискованных вызовов нет'),
-    { sub: h('span', {}, btn('', 'все'), btn('block', 'блокировки'), btn('review', 'проверки')), flush: true }));
+  const search = h('input', {
+    class: 'search-input', type: 'search', placeholder: 'Поиск по номеру…', value: query,
+    oninput: (e) => { ctx.problemsQuery = e.target.value; },
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); ctx.rerender(); } },
+  });
+
+  let body;
+  if (tab === 'pool') {
+    if (!status.store.enabled) {
+      body = widget('Общий пул вызовов', h('div', { class: 'empty' }, 'Журнал (Postgres) недоступен — общий пул не сохраняется.'));
+    } else {
+      const recent = await getRecent(150, '');
+      const items = (recent.items || []).filter((e) => matchesQuery(e, query));
+      body = widget('Общий пул вызовов',
+        items.length ? recentTable(items) : h('div', { class: 'empty' }, query ? 'Ничего не найдено' : 'Журнал пуст.'),
+        { sub: 'из журнала Postgres — allow попадает выборочно, не весь поток', flush: true });
+    }
+  } else {
+    const items = data.items.filter((e) => matchesQuery(e, query));
+    body = widget('Рискованные вызовы',
+      items.length ? eventTable(items, { thresholds }) : h('div', { class: 'empty' }, query ? 'Ничего не найдено' : 'Рискованных вызовов нет'),
+      { sub: h('span', {}, filterBtn('', 'все'), filterBtn('block', 'блокировки'), filterBtn('review', 'проверки')), flush: true });
+  }
+
+  root.replaceChildren(
+    summary,
+    h('div', { style: 'margin-top:14px' }, trend),
+    h('div', { class: 'problems-toolbar', style: 'margin-top:14px' },
+      h('div', {}, tabBtn('problems', 'Проблемы'), tabBtn('pool', 'Общий пул')),
+      search),
+    h('div', { style: 'margin-top:10px' }, body));
 }
