@@ -149,11 +149,21 @@ func AnalyzeChains(edges map[uint64]uint64, hubFanIn int) *ChainIndex {
 			starts = append(starts, from)
 		}
 	}
+	ringStart := len(starts)
 	for from := range edges { // второй проход: остатки чистых колец без настоящего начала
 		if _, has := hasIncoming[from]; has {
 			starts = append(starts, from)
 		}
 	}
+	// Обход карты в Go не определён, а порядок starts решает, чей путь «застолбит» общий узел
+	// при слиянии цепочек (см. комментарий выше) — без сортировки два прогона на одном датасете
+	// могли молча дать разные цепочки. Сортируем каждую группу отдельно: самим разбиением на
+	// «настоящие начала» и «остаток колец» уже задан приоритет (не хотим, чтобы случайный порядок
+	// упаковки сделал кольцевой узел началом раньше настоящего начала), числовой порядок внутри
+	// группы — только для воспроизводимости, семантической роли не несёт.
+	trueStarts, ringRest := starts[:ringStart], starts[ringStart:]
+	sort.Slice(trueStarts, func(i, j int) bool { return trueStarts[i] < trueStarts[j] })
+	sort.Slice(ringRest, func(i, j int) bool { return ringRest[i] < ringRest[j] })
 
 	ix := &ChainIndex{m: make(map[uint64]ChainInfo)}
 	visited := make(map[uint64]struct{}, len(edges))

@@ -1,6 +1,9 @@
 package graph
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestChainEdgesObserveAndSnapshot(t *testing.T) {
 	e := NewChainEdges(0)
@@ -146,5 +149,36 @@ func TestAnalyzeChainsNoDuplicateFragmentsBelowHubThreshold(t *testing.T) {
 	}
 	if seen[300] != 1 {
 		t.Fatalf("tail node 300 must be reachable through exactly one chain: %+v", list)
+	}
+}
+
+// Регрессия: AnalyzeChains решает, какой из нескольких равнозначных стартов (1..5 выше) «застолбит»
+// общий хвост, по порядку starts — а он без сортировки наследовал неопределённый порядок обхода
+// карты edges. Официальный ответ кейса (cmd/cdrflag) гонится один раз, но должен быть
+// воспроизводим: повторный прогон на тех же данных обязан дать тот же список номеров, не просто
+// тот же по размеру. Строим одинаковые по содержимому, но физически разные map (разные литералы —
+// у Go нет гарантии, что обход двух независимых map с одинаковыми ключами в одном процессе даст
+// одинаковый порядок), прогоняем много раз и сравниваем сериализованный результат.
+func TestAnalyzeChainsDeterministicAcrossRuns(t *testing.T) {
+	edgesOf := func() map[uint64]uint64 {
+		return map[uint64]uint64{
+			1: 100, 2: 100, 3: 100, 4: 100, 5: 100,
+			100: 200, 200: 300,
+			10: 20, 20: 30, 30: 10, // чистое кольцо — второй проход
+		}
+	}
+	serialize := func(ix *ChainIndex) string {
+		s := ""
+		for _, c := range ix.List() {
+			s += fmt.Sprintf("%v|", c.Path)
+		}
+		return s
+	}
+	want := serialize(AnalyzeChains(edgesOf(), 10))
+	for i := 0; i < 20; i++ {
+		got := serialize(AnalyzeChains(edgesOf(), 10))
+		if got != want {
+			t.Fatalf("run %d: non-deterministic chain list\n want=%s\n got =%s", i, want, got)
+		}
 	}
 }
