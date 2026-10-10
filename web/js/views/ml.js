@@ -18,14 +18,19 @@ async function optional(p) {
   try { return await p; } catch (e) { if (e instanceof ApiError && e.status === 401) throw e; return null; }
 }
 
-/** Раскрывающийся раздел (нативный <details> — без состояния в JS). open — раскрыт по умолчанию. */
-function details(summary, body, open = false) {
-  const d = h('details', { class: 'disclosure' }, h('summary', {}, summary), h('div', { class: 'disclosure-body' }, body));
-  if (open) d.open = true;
+// Экран живой (опрашивается раз в 3 с, см. app.js) — render() целиком пересобирает DOM на каждый
+// тик, поэтому нативный <details> сам по себе не держит состояние между перерисовками: открытый
+// пользователем раздел захлопывался бы через 3 секунды. openSet (общий на вкладку, живёт в ctx)
+// запоминает, какие разделы открыты, по ключу — заголовку; restore при каждом render().
+function details(key, summary, body, openSet) {
+  const d = h('details', { class: 'disclosure', ontoggle: () => { if (d.open) openSet.add(key); else openSet.delete(key); } },
+    h('summary', {}, summary), h('div', { class: 'disclosure-body' }, body));
+  if (openSet.has(key)) d.open = true;
   return d;
 }
 
-export async function render(root) {
+export async function render(root, ctx) {
+  const openSet = ctx.mlOpen || (ctx.mlOpen = new Set());
   const [status, report, service] = await Promise.all([getStatus(), optional(getMLReport()), optional(getMLService())]);
   const ml = status.engine.ml;
   const parts = [liveRow(status, ml, service)];
@@ -42,12 +47,12 @@ export async function render(root) {
   }
   parts.push(headline(report));
   parts.push(
-    details('Данные и обучение', dataDetail(report)),
-    details('Кривые качества — ROC, PR, калибровка', curves(report)),
-    details('Матрицы ошибок и точность в реальном потоке', confusions(report)),
-    details('Где модель ошибается — по типам абонентов', kinds(report)),
-    details('Графовый анализ связей (NetworkX)', graphSection(report)),
-    details('Важность признаков и скорость реакции', tail(report, status)),
+    details('data', 'Данные и обучение', dataDetail(report), openSet),
+    details('curves', 'Кривые качества — ROC, PR, калибровка', curves(report), openSet),
+    details('confusions', 'Матрицы ошибок и точность в реальном потоке', confusions(report), openSet),
+    details('kinds', 'Где модель ошибается — по типам абонентов', kinds(report), openSet),
+    details('graph', 'Графовый анализ связей (NetworkX)', graphSection(report), openSet),
+    details('tail', 'Важность признаков и скорость реакции', tail(report, status), openSet),
   );
   root.replaceChildren(...parts);
 }

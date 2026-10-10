@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Демонстрация и смоук-тест сервиса скоринга вызовов.
 
-    python3 scripts/demo.py --url http://192.168.10.200:8000 [--api-key KEY] [--fan]
+    python3 scripts/demo.py --url http://192.168.10.200:8000 [--api-key KEY] [--fan] [--graph]
 
 Гоняет ключевые сценарии, печатает решение и главные причины, а в конце сверяет жёсткие
 ожидания (скорая не блокируется, подмена не проходит как allow, кампания обзвона доходит до block,
 колл-центр и обычные абоненты не блокируются). Код возврата 1, если хоть одно ожидание нарушено:
 скрипт можно запускать после каждого деплоя. Только стандартная библиотека.
+
+--graph засевает экран «Граф связей» на живом стенде реалистичными данными сразу по всем четырём
+детекторам (веер, карусель, SIM-box, цепочка переадресации) и клону SIM — не трюк в обход API, а те
+же вызовы, что и в бою, через /v1/calls/score; ждёт один пересчёт графа (~40 с) и проверяет, что
+все пять действительно нашлись.
 """
 from __future__ import annotations
 
@@ -83,6 +88,7 @@ def main() -> int:
     ap.add_argument("--url", default="http://127.0.0.1:8000")
     ap.add_argument("--api-key", default="")
     ap.add_argument("--fan", action="store_true", help="сценарий веера (ждёт ~40 с пересчёта графа)")
+    ap.add_argument("--graph", action="store_true", help="засеять все 4 графовых детектора + клон SIM (ждёт ~40 с)")
     ap.add_argument("--seed", type=int, default=int(time.time()))
     a = ap.parse_args()
     rng, api, rep = random.Random(a.seed), Client(a.url, a.api_key), Report()
@@ -173,6 +179,81 @@ def main() -> int:
                        "src_country": "RU", "conn_type": "mobile"})
         show("Веер: 6 подряд идущих номеров, общий шаблон, непересекающиеся списки", r, 4)
         rep.expect("веер найден графом", "fan" in (r.get("signals") or []), f"сигналы: {r.get('signals')}")
+
+    # 9. Все четыре графовых детектора + клон SIM разом (--graph): чтобы на живом стенде (панель,
+    # /v1/graph/*) сразу было что показать, а не только пустые подсказки «такого паттерна пока нет».
+    if a.graph:
+        print("\n--- Графовые детекторы (--graph) ---")
+
+        # Веер (если --fan не передан отдельно)
+        fan_base = int(mobile(rng, "911")[2:])
+        t = now - timedelta(hours=1)
+        for i in range(40):
+            t += timedelta(seconds=60)
+            for k in range(6):
+                api.score({"call_id": f"gfan-{uid}-{i}-{k}", "caller": f"+7{fan_base + k:010d}", "callee": mobile(rng),
+                           "started_at": iso(t), "duration_sec": rng.choice([0, 3, 4, 5]), "src_country": "RU", "conn_type": "mobile"})
+
+        # Карусель: закрытая группа из 6 номеров звонит только друг другу
+        group = [mobile(rng, "933") for _ in range(6)]
+        t = now - timedelta(hours=18)
+        for i in range(110):
+            for caller in group:
+                callee = rng.choice([g for g in group if g != caller])
+                t += timedelta(seconds=rng.randint(3, 9))
+                api.score({"call_id": f"car-{uid}-{i}-{group.index(caller)}", "caller": caller, "callee": callee,
+                           "started_at": iso(t), "duration_sec": rng.randint(8, 45), "src_country": "RU", "conn_type": "mobile"})
+
+        # SIM-box: несколько SIM работают только на исходящие, каждый получатель — новый
+        simbox_nums = []
+        for s in range(3):
+            sim = mobile(rng, "966")
+            simbox_nums.append(sim)
+            t = now - timedelta(hours=16)
+            for i in range(60):
+                t += timedelta(seconds=rng.randint(200, 500))
+                api.score({"call_id": f"sbx-{uid}-{s}-{i}", "caller": sim, "callee": mobile(rng),
+                           "started_at": iso(t), "duration_sec": rng.randint(15, 40), "src_country": "RU", "conn_type": "mobile"})
+
+        # Цепочка переадресации: B → C → D → E (3 перехода)
+        nodes = [mobile(rng, "944") for _ in range(4)]
+        t = now - timedelta(minutes=30)
+        for i in range(3):
+            t += timedelta(seconds=20)
+            api.score({"call_id": f"chain-{uid}-{i}", "caller": mobile(rng), "callee": nodes[i], "started_at": iso(t),
+                       "duration_sec": rng.randint(5, 30), "direction": "forwarded", "forward_to": nodes[i + 1],
+                       "src_country": "RU", "conn_type": "mobile"})
+
+        # Клон SIM: один номер, несколько разных IMSI
+        clone_num = mobile(rng, "955")
+        t = now - timedelta(hours=2)
+        for i in range(5):
+            t += timedelta(minutes=rng.randint(5, 40))
+            api.score({"call_id": f"clone-{uid}-{i}", "caller": clone_num, "callee": mobile(rng), "started_at": iso(t),
+                       "duration_sec": rng.randint(10, 60), "imsi": f"250011234{i:06d}", "src_country": "RU", "conn_type": "mobile"})
+
+        print("\n… жду пересчёта графовых индексов (~40 с)")
+        time.sleep(40)
+
+        r_car = api.score({"call_id": f"car-probe-{uid}", "caller": group[0], "callee": group[1], "started_at": iso(now),
+                            "duration_sec": 20, "src_country": "RU", "conn_type": "mobile"})
+        show("Карусель: 6 номеров звонят только друг другу", r_car, 4)
+        rep.expect("карусель найдена графом", "carousel" in (r_car.get("signals") or []), f"сигналы: {r_car.get('signals')}")
+
+        r_sbx = api.score({"call_id": f"sbx-probe-{uid}", "caller": simbox_nums[0], "callee": mobile(rng), "started_at": iso(now),
+                            "duration_sec": 20, "src_country": "RU", "conn_type": "mobile"})
+        show("SIM-box: только исходящие, каждый получатель новый", r_sbx, 4)
+        rep.expect("SIM-box найден графом", "sim_box" in (r_sbx.get("signals") or []), f"сигналы: {r_sbx.get('signals')}")
+
+        r_chain = api.score({"call_id": f"chain-probe-{uid}", "caller": mobile(rng), "callee": nodes[0], "started_at": iso(now),
+                              "duration_sec": 10, "direction": "forwarded", "forward_to": nodes[1], "src_country": "RU", "conn_type": "mobile"})
+        show("Цепочка переадресации: B → C → D → E", r_chain, 4)
+        rep.expect("цепочка найдена графом", "forward_chain" in (r_chain.get("signals") or []), f"сигналы: {r_chain.get('signals')}")
+
+        r_clone = api.score({"call_id": f"clone-probe-{uid}", "caller": clone_num, "callee": mobile(rng), "started_at": iso(now),
+                              "duration_sec": 10, "imsi": "2500199999999", "src_country": "RU", "conn_type": "mobile"})
+        show("Клон SIM: один номер, несколько IMSI", r_clone, 4)
+        rep.expect("клон SIM найден", "sim_clone" in (r_clone.get("signals") or []), f"сигналы: {r_clone.get('signals')}")
 
     print(f"\n{'=' * 60}\nИтог: {len(rep.rows) - rep.failed} из {len(rep.rows)} ожиданий выполнено")
     return 1 if rep.failed else 0
