@@ -23,3 +23,10 @@ jobs:
           done
           echo "health check failed" >&2
           exit 1
+      # Индексы графовых детекторов (веер, карусель, SIM-box, цепочка) живут только в памяти
+      # процесса — рестарт при каждом деплое их обнуляет. Без пересева «Граф связей» выглядит
+      # пустым до накопления нового трафика, поэтому сеем демо-сценарии сразу после рестарта.
+      - name: Reseed graph demo data
+        run: |
+          set -a; source /home/deploy/redflag/.env; set +a
+          python3 scripts/demo.py --url http://127.0.0.1:8000 --api-key "${API_KEY:-}" --graph
