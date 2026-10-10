@@ -398,17 +398,37 @@ svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
 /* ---- граф ---- */
 .graph-legend { display: flex; gap: 18px; font-size: 12px; color: var(--on-surface-variant); padding: 4px 2px; }
 svg.graph text { font-size: 10px; fill: var(--on-surface-variant); }
+svg.graph { display: block; max-width: 100%; height: auto; }
 
-/* ---- цепочки переадресации (список путей B → C → D) ---- */
-.chain-list { display: grid; gap: 2px; }
-.chain-row { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 10px 14px; border-radius: var(--shape-sm);
-  transition: background-color var(--dur-s) var(--ease); }
-.chain-row:hover { background: var(--surface-container); }
-.chain-node { font-size: 12.5px; padding: 3px 9px; border-radius: var(--shape-full); background: var(--surface-container-high); }
+/* ---- переключатель группы/веера над графом ---- */
+.graph-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.chip.picker { cursor: pointer; background: var(--surface-container); border-color: var(--outline-variant);
+  font-family: ui-monospace, monospace; transition: background-color var(--dur-s) var(--ease), border-color var(--dur-s) var(--ease); }
+.chip.picker:hover { background: var(--surface-container-high); }
+.chip.picker.active { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
 
-/* ---- карусели (группа номеров-пилюль) ---- */
-.carousel-group { padding: 10px 0; border-bottom: 1px solid var(--outline-variant); }
-.carousel-group:last-child { border-bottom: 0; }
+/* ---- цепочки переадресации: несколько маленьких графов-строк ---- */
+.chain-graphs { display: flex; flex-direction: column; gap: 4px; }
+.chain-graph-row { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-radius: var(--shape-sm);
+  transition: background-color var(--dur-s) var(--ease); overflow-x: auto; }
+.chain-graph-row:hover { background: var(--surface-container); }
+
+/* ---- SIM-box: сетка карточек со «звездой» одноразовых контактов ---- */
+.simbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; }
+.simbox-card { text-align: center; }
+
+/* ---- раскрывающиеся разделы (нативный <details>, без состояния в JS) ---- */
+.disclosure { background: var(--surface-container-low); border: 1px solid var(--outline-variant); border-radius: var(--shape-md);
+  margin-top: 14px; }
+.disclosure > summary { list-style: none; cursor: pointer; padding: 14px 18px; font-weight: 500; font-size: 14.5px;
+  display: flex; align-items: center; gap: 10px; user-select: none; }
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: ''; width: 9px; height: 9px; flex: none; border-right: 2px solid var(--on-surface-variant);
+  border-bottom: 2px solid var(--on-surface-variant); transform: rotate(-45deg); transition: transform var(--dur-s) var(--ease); margin-left: 2px; }
+.disclosure[open] > summary::before { transform: rotate(45deg); }
+.disclosure > summary:hover { background: var(--surface-container); border-radius: var(--shape-md); }
+.disclosure-body { padding: 0 18px 18px; }
+.disclosure-body .grid { margin-top: 0 !important; }
 
 /* ---- раздел «Качество модели» ---- */
 .flow { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }

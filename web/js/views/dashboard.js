@@ -46,19 +46,14 @@ export async function render(root, ctx) {
     hbars((stats.top_signals || []).slice(0, 7).map((s) => ({ name: s.name, label: signalName(s.name), value: s.count, color: 'var(--c-block)' }))));
 
   const allT = status.totals || {};
+  const mlTrouble = (allT.ml_errors || 0) + (allT.ml_skipped || 0);
   const cascade = widget('Каскад решений', h('div', {},
     h('div', { style: 'display:flex;justify-content:space-around;align-items:center;gap:8px' },
       ring(1 - mlShare, { color: 'var(--c-info)', label: 'линейная стадия' }), ring(mlShare, { color: 'var(--c-good)', label: 'ML (CatBoost)' }), ring(flaggedShare, { color: 'var(--c-review)', label: 'помечено' })),
-    h('p', { class: 'muted', style: 'margin:16px 0 10px' },
-      'Весь трафик сначала проходит линейную стадию (микросекунды). В ML уходит только спорная «серая зона» — оценка рядом с порогом или сработавший сильный сигнал.'),
-    h('dl', { class: 'kv' },
-      h('dt', {}, 'Жёсткий пол'),
-      h('dd', {}, `${fmt.int(t.floors)} вызовов за ${ctx.windowLabel} — подмена, номер вне диапазонов, клон SIM, цепочка переадресации, SIM-box или карусель поднимают вердикт до «проверки» независимо от веса модели`),
-      h('dt', {}, 'Вызовы к ML-сервису'),
-      h('dd', {}, `${fmt.int(allT.ml_calls || 0)} успешно, ${fmt.int(allT.ml_errors || 0)} ошибок, ${fmt.int(allT.ml_skipped || 0)} пропущено (откат на линейную стадию) — с запуска сервиса`),
-      h('dt', {}, 'Повторная доставка'),
-      h('dd', {}, `${fmt.int(t.duplicates)} за ${ctx.windowLabel} — учтена один раз по call_id`),
-    )));
+    h('div', { class: 'grid cols-3', style: 'margin-top:16px' },
+      tile('Жёсткий пол', fmt.int(t.floors), 'улика, не мнение модели', t.floors ? 'avg' : 'ok'),
+      tile('К ML-сервису', fmt.int(allT.ml_calls || 0), mlTrouble ? `${fmt.int(mlTrouble)} сбоев` : 'без сбоев', mlTrouble ? 'warn' : 'ok'),
+      tile('Повторы', fmt.int(t.duplicates), 'не задвоены', ''))));
 
   const health = widget('Состояние компонентов', statusList(componentStatuses(status)), { sub: `версия ${status.service.version}` });
 

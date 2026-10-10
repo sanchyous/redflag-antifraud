@@ -1,5 +1,6 @@
-// «Качество модели» — отчётность по работе модели: состояние ML-сервиса, каскад решения, качество (кривые, матрицы ошибок,
-// ложные срабатывания по типам абонентов) и вклад ML относительно линейной стадии.
+// «Качество модели» — отчётность по работе модели. Сверху — то, что должно быть понятно с одного
+// взгляда (работает ли ML, держит ли цели по ложным срабатываниям); всё остальное (кривые, матрицы
+// ошибок, важность признаков, графовый анализ) — за раскрывающимися разделами, а не одной стеной сразу.
 // Качество берётся из отчёта обучения (report.json рядом с моделью), живые показатели — из ядра и ML-сервиса.
 
 import { ApiError, getMLReport, getMLService, getStatus } from '../api.js';
@@ -17,6 +18,13 @@ async function optional(p) {
   try { return await p; } catch (e) { if (e instanceof ApiError && e.status === 401) throw e; return null; }
 }
 
+/** Раскрывающийся раздел (нативный <details> — без состояния в JS). open — раскрыт по умолчанию. */
+function details(summary, body, open = false) {
+  const d = h('details', { class: 'disclosure' }, h('summary', {}, summary), h('div', { class: 'disclosure-body' }, body));
+  if (open) d.open = true;
+  return d;
+}
+
 export async function render(root) {
   const [status, report, service] = await Promise.all([getStatus(), optional(getMLReport()), optional(getMLService())]);
   const ml = status.engine.ml;
@@ -32,7 +40,15 @@ export async function render(root) {
     root.replaceChildren(...parts);
     return;
   }
-  parts.push(dataBanner(report), qualityRow(report), curves(report), confusions(report), kinds(report), graphSection(report), tail(report, status));
+  parts.push(headline(report));
+  parts.push(
+    details('Данные и обучение', dataDetail(report)),
+    details('Кривые качества — ROC, PR, калибровка', curves(report)),
+    details('Матрицы ошибок и точность в реальном потоке', confusions(report)),
+    details('Где модель ошибается — по типам абонентов', kinds(report)),
+    details('Графовый анализ связей (NetworkX)', graphSection(report)),
+    details('Важность признаков и скорость реакции', tail(report, status)),
+  );
   root.replaceChildren(...parts);
 }
 
@@ -74,25 +90,34 @@ function cascade(ml, report) {
   { sub: '«проверка» — вызов проходит и уходит аналитику' });
 }
 
-// ---- данные и качество ----
+// ---- заголовок: вердикт с одного взгляда ----
 
-function dataBanner(r) {
-  const d = r.data, m = r.model;
-  return h('div', { class: 'note' },
-    h('b', {}, d.synthetic ? 'Синтетические данные. ' : 'Размеченные данные. '),
-    `${m.version}, обучена ${fmt.dateTime(m.trained_at)}. Выборки: обучение ${fmt.int(d.train)}, калибровка ${fmt.int(d.calib)}, проверка ${fmt.int(d.test)} (мошенничество ${pct(d.test_fraud_share, 1)}).`);
+function headline(r) {
+  const q = r.quality, t = r.targets;
+  const okR = q.review.fpr <= t.review_fpr * 1.3;
+  const okB = q.block.fpr <= t.block_fpr * 1.5;
+  const tone = (ok) => (ok ? 'ok' : 'warn');
+  return h('div', {},
+    h('div', { class: 'grid cols-4', style: 'margin-top:14px' },
+      tile('ROC-AUC', fmt.num(q.auc, 4), 'качество ранжирования', 'info'),
+      tile('Проверка: полнота / ложных', `${pct(q.review.recall)} / ${fpr(q.review.fpr)}`, `цель ложных ≤ ${fpr(t.review_fpr)}`, tone(okR)),
+      tile('Блок: полнота / ложных', `${pct(q.block.recall)} / ${fpr(q.block.fpr)}`, `цель ложных ≤ ${fpr(t.block_fpr)}`, tone(okB)),
+      tile('Экстренные', `${fmt.int(q.emergency.blocked)} из ${fmt.int(q.emergency.n)}`, 'заблокировано (должно быть 0)', q.emergency.blocked ? 'high' : 'ok')),
+    h('p', { class: 'muted', style: 'font-size:12.5px;margin:10px 2px 0' },
+      r.data.synthetic ? 'Данные синтетические — подробности и ограничения в разделе «Данные и обучение» ниже.' : 'Данные размеченные.'));
 }
 
-function qualityRow(r) {
-  const q = r.quality, t = r.targets;
-  const okR = q.review.fpr <= t.review_fpr * 1.05, okB = q.block.fpr <= t.block_fpr * 1.5;
-  return h('div', { class: 'grid cols-6', style: 'margin-top:14px' },
-    tile('ROC-AUC', fmt.num(q.auc, 4), '', 'info'),
-    tile('PR-AUC', fmt.num(q.pr_auc, 4), '', 'info'),
-    tile('Проверка: поймано', pct(q.review.recall), `${fmt.int(q.review.tp)} из ${fmt.int(q.review.tp + q.review.fn)}`),
-    tile('Проверка: ложных', fpr(q.review.fpr), `цель ≤ ${fpr(t.review_fpr)}, ${fmt.int(q.review.fp)} шт.`, okR ? 'ok' : 'warn'),
-    tile('Блок: поймано', pct(q.block.recall), `${fmt.int(q.block.tp)} из ${fmt.int(q.block.tp + q.block.fn)}`),
-    tile('Блок: ложных', fpr(q.block.fpr), `цель ≤ ${fpr(t.block_fpr)}, ${fmt.int(q.block.fp)} из ${fmt.int(r.data.test_legit)}`, okB ? 'ok' : 'high'));
+function dataDetail(r) {
+  const d = r.data, m = r.model;
+  return h('div', {},
+    h('p', { class: 'muted', style: 'margin-top:0' },
+      `${d.synthetic ? 'Синтетические данные.' : 'Размеченные данные.'} ${m.version}, обучена ${fmt.dateTime(m.trained_at)}.`),
+    h('dl', { class: 'kv' },
+      h('dt', {}, 'Обучение'), h('dd', {}, fmt.int(d.train)),
+      h('dt', {}, 'Калибровка'), h('dd', {}, fmt.int(d.calib)),
+      h('dt', {}, 'Проверка'), h('dd', {}, `${fmt.int(d.test)} (мошенничество ${pct(d.test_fraud_share, 1)})`),
+      h('dt', {}, 'Проверка: поймано'), h('dd', {}, `${pct(r.quality.review.recall)} из ${fmt.int(r.quality.review.tp + r.quality.review.fn)}`),
+      h('dt', {}, 'Блок: поймано'), h('dd', {}, `${pct(r.quality.block.recall)} из ${fmt.int(r.quality.block.tp + r.quality.block.fn)}`)));
 }
 
 function curves(r) {
@@ -138,7 +163,7 @@ function curves(r) {
     h('div', { class: 'muted', style: 'font-size:12px;margin-top:8px' }, `AUC: ${fmt.num(u.auc_stage1, 4)} → ${fmt.num(u.auc_ml, 4)}`)),
   { sub: 'пойманные при доле ложных' });
 
-  return h('div', { class: 'grid cols-3', style: 'margin-top:14px' }, roc, pr, dist, sweep, cal, uplift);
+  return h('div', { class: 'grid cols-3' }, roc, pr, dist, sweep, cal, uplift);
 }
 
 function matrix(title, c, sub) {
@@ -155,7 +180,7 @@ function confusions(r) {
   const q = r.quality;
   const prec = h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Доля мошенничества'), h('th', { class: 'num' }, 'Проверка'), h('th', { class: 'num' }, 'Блок'))),
     h('tbody', {}, q.precision_by_prevalence.map((p) => h('tr', {}, h('td', {}, pct(p.prevalence, 1)), h('td', { class: 'num' }, pct(p.review)), h('td', { class: 'num' }, pct(p.block))))));
-  return h('div', { class: 'grid cols-3', style: 'margin-top:14px' },
+  return h('div', { class: 'grid cols-3' },
     matrix('Ошибки: проверка', q.review, 'вердикт ≥ проверка'),
     matrix('Ошибки: блок', q.block, 'вердикт = блок'),
     widget('Точность в реальном потоке', h('div', { class: 'table-wrap' }, prec), { sub: 'при тех же полноте и ложных', flush: true }));
@@ -169,7 +194,7 @@ function kinds(r) {
   { max: Math.max(...legit.map((x) => x.review / x.n), 0.02), valWidth: 110 }), { sub: 'доля «проверка» и «блок»' });
   const det = widget('Обнаружение по типам мошенничества', hbars(fraud.map((x) => ({ name: x.k, label: kindName(x.k), value: x.review / x.n,
     text: `${pct(x.review / x.n)} · блок ${pct(x.block / x.n, 0)}`, color: C.ml })), { max: 1, valWidth: 130 }), { sub: 'доля «проверка» и «блок»' });
-  return h('div', { class: 'grid cols-2', style: 'margin-top:14px' }, fp, det);
+  return h('div', { class: 'grid cols-2' }, fp, det);
 }
 
 // ---- графовый анализ (NetworkX, ADR-0018): структура сети обучающего набора и сверка с онлайн-эвристикой Go ----
@@ -201,7 +226,7 @@ function graphSection(r) {
         (fv.capped ? ` · кандидатов ограничено до ${fmt.int(fv.candidates)}` : '')));
   }
   const validation = widget('Сверка с онлайн-эвристикой Go', body, { sub: 'расхождение — честная граница окна, не ошибка' });
-  return h('div', { class: 'grid cols-2', style: 'margin-top:14px' }, summary, validation);
+  return h('div', { class: 'grid cols-2' }, summary, validation);
 }
 
 function tail(r, status) {
@@ -209,7 +234,7 @@ function tail(r, status) {
   const live = status.totals;
   const liveMl = live.linear + live.ml ? live.ml / (live.linear + live.ml) : null;
   const imp = Object.entries(r.importances).slice(0, 14).map(([name, v]) => ({ name, label: factorName(name), title: name, value: v, text: fmt.num(v, 1) }));
-  return h('div', { class: 'grid cols-3', style: 'margin-top:14px' },
+  return h('div', { class: 'grid cols-3' },
     widget('Важность признаков', hbars(imp, { color: C.ml }), { sub: `топ-14 из ${r.model.features.length}`, cls: 'span-2' }),
     widget('Каскад и реакция', h('dl', { class: 'kv' },
       h('dt', {}, 'В ML: обучение'), h('dd', {}, `${pct(q.ml_traffic_share)} (легитимных ${pct(q.ml_traffic_share_legit)})`),
