@@ -212,8 +212,10 @@ def main() -> int:
             t = now - timedelta(hours=16)
             for i in range(60):
                 t += timedelta(seconds=rng.randint(200, 500))
+                # средняя длительность принятых должна быть заметно выше 30 с (порог детектора) —
+                # иначе паттерн неотличим от веера/wangiri по этому признаку
                 api.score({"call_id": f"sbx-{uid}-{s}-{i}", "caller": sim, "callee": mobile(rng),
-                           "started_at": iso(t), "duration_sec": rng.randint(15, 40), "src_country": "RU", "conn_type": "mobile"})
+                           "started_at": iso(t), "duration_sec": rng.randint(35, 70), "src_country": "RU", "conn_type": "mobile"})
 
         # Цепочка переадресации: B → C → D → E (3 перехода)
         nodes = [mobile(rng, "944") for _ in range(4)]
