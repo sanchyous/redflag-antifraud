@@ -56,9 +56,7 @@ export function eventTable(items, { compact = false, thresholds } = {}) {
 function recentTable(items) {
   const head = h('tr', {}, h('th', {}, 'Время'), h('th', {}, 'Серьёзность'), h('th', {}, 'Вызов'), h('th', {}, 'Причина'), h('th', { class: 'num' }, 'Score'));
   const rows = items.map((e) => {
-    let reasons = [];
-    try { reasons = JSON.parse(e.reasons || '[]'); } catch { /* журнал мог сохранить пустое значение */ }
-    const top = reasons.find((r) => r.effect === 'raises');
+    const top = (e.reasons || []).find((r) => r.effect === 'raises');
     return h('tr', { class: 'row' },
       h('td', { class: 'muted', title: fmt.dateTime(e.created_at) }, fmt.ago(e.created_at)),
       h('td', {}, sevBadge(e.decision)),
