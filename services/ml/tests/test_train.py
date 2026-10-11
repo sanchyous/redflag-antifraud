@@ -38,6 +38,13 @@ def test_report_content(trained):
     meta = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert meta["graph"]["available"] is True
     assert meta["graph"]["summary"]["nodes"] > 0
+    learning = meta["curves"]["learning"]
+    # CatBoost по умолчанию считает eval_metric (AUC) только на валидации, на train — только loss
+    # функции (Logloss); learning_curve() берёт то, что есть в обеих частях, этим и подтверждается.
+    assert learning["metric"] in ("AUC", "Logloss")
+    assert len(learning["iteration"]) == len(learning["train"]) == len(learning["validation"])
+    assert len(learning["iteration"]) > 1
+    assert learning["best_iteration"] >= 0
 
 
 def test_model_respects_monotone_constraints(trained):
@@ -111,3 +118,22 @@ def test_dataset_loader_checks_columns(tmp_path, dataset_dir):
     with pytest.raises(D.DatasetError):
         D.load_split(tmp_path, "missing", FEATURES)
     assert D.trainable(D.load_split(dataset_dir, "train", FEATURES))["emergency"].eq(0).all()
+
+
+def test_learning_curve_edge_cases():
+    from training.reportdata import learning_curve
+
+    assert learning_curve(None) is None
+    assert learning_curve({}) is None
+    assert learning_curve({"learn": {"Logloss": [1.0]}, "validation": {}}) is None  # metric missing on validation side
+    assert learning_curve({"learn": {"AUC": []}, "validation": {"AUC": []}}) is None  # no iterations
+
+    evals = {
+        "learn": {"AUC": list(np.linspace(0.5, 0.99, 500))},
+        "validation": {"AUC": list(np.linspace(0.5, 0.95, 500))},
+    }
+    lc = learning_curve(evals, n=50)
+    assert lc["metric"] == "AUC"
+    assert len(lc["iteration"]) <= 50
+    assert lc["iteration"][0] == 0 and lc["iteration"][-1] == 499
+    assert lc["best_iteration"] == 499  # validation AUC monotonically increasing in this synthetic example

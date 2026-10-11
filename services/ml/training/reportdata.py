@@ -81,6 +81,31 @@ def threshold_sweep(y: np.ndarray, s: np.ndarray, n: int = 48) -> dict:
     return {"threshold": _round(th, 6), "fpr": _round(fpr, 6), "recall": _round(rec, 5)}
 
 
+def learning_curve(evals_result: dict | None, n: int = 120) -> dict | None:
+    """Кривая обучения CatBoost: метрика на train и на отложенной выборке по итерациям бустинга —
+    видно переобучение (расхождение кривых) и момент ранней остановки, не только финальный результат.
+    evals_result — вывод `model.get_evals_result()`; downsample до n точек, итераций обычно больше."""
+    if not evals_result:
+        return None
+    learn = evals_result.get("learn", {})
+    valid = evals_result.get("validation", {})
+    metric = next((m for m in ("AUC", "Logloss") if m in learn), None)
+    if metric is None or metric not in valid:
+        return None
+    tr, va = np.asarray(learn[metric], dtype=np.float64), np.asarray(valid[metric], dtype=np.float64)
+    total = len(tr)
+    if total == 0:
+        return None
+    idx = np.unique(np.linspace(0, total - 1, min(n, total)).astype(int))
+    return {
+        "metric": metric,
+        "iteration": [int(i) for i in idx],
+        "train": _round(tr[idx], 6),
+        "validation": _round(va[idx], 6),
+        "best_iteration": int(np.argmax(va)) if metric == "AUC" else int(np.argmin(va)),
+    }
+
+
 def recall_at_fpr(y: np.ndarray, s: np.ndarray, fpr_target: float) -> float:
     legit = np.sort(s[y == 0])
     allowed = int(len(legit) * fpr_target)
@@ -102,6 +127,7 @@ def build(
     importances: dict[str, float],
     stage1_review: float,
     graph: dict | None = None,
+    evals_result: dict | None = None,
 ) -> dict:
     body_mask = test_full["class"].to_numpy() != CLASS_EMERGENCY
     body = test_full[body_mask].reset_index(drop=True)
@@ -174,6 +200,7 @@ def build(
             "score_hist": score_hist(y, s),
             "calibration": calibration(y, s, prevalence),
             "sweep": threshold_sweep(y, s),
+            "learning": learning_curve(evals_result),
         },
         "uplift": {
             "auc_stage1": stage1_auc,

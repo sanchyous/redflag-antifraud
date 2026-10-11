@@ -109,6 +109,7 @@ def train(
     calib = D.trainable(calib_full)
 
     model = fit_catboost(train_df, features, legit_weight, seed, iterations)
+    evals_result = model.get_evals_result()
     a, b = fit_platt(raw_logits(model, calib, features), calib["label"].to_numpy(), prevalence)
 
     def score(df: pd.DataFrame) -> np.ndarray:
@@ -164,6 +165,7 @@ def train(
                 importances=importances,
                 stage1_review=stage1_review,
                 graph=graph,
+                evals_result=evals_result,
             ),
             ensure_ascii=False,
             separators=(",", ":"),
