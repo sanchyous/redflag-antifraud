@@ -10,6 +10,15 @@
   Кейс №4 хакатона Nexign «Телеком будущего».
 </p>
 
+<p align="center">
+  <a href="https://redflagteam.gitbook.io/redflagteam-docs/">
+    <img src="https://img.shields.io/badge/Документация-GitBook-0b57d0?style=for-the-badge&logo=gitbook&logoColor=white" alt="Документация на GitBook">
+  </a>
+  <a href="http://188.187.214.200:8000/ui/">
+    <img src="https://img.shields.io/badge/Живой_стенд-панель-1e6e3c?style=for-the-badge&logo=go&logoColor=white" alt="Живой стенд панели мониторинга">
+  </a>
+</p>
+
 ---
 
 По одному «конверту» вызова — номера, время, длительность, тип соединения, страна и оператор источника
