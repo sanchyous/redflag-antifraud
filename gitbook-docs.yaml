@@ -1,0 +1,12 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: RedFlag — антифрод без прослушки
+  structure:
+    - type: space
+      key: redflag-antifraud
+      title: RedFlag — антифрод без прослушки
+      path: /
+      default: true
+      content:
+        directory: ./
+        language: ru
