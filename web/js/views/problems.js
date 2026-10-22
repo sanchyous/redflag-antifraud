@@ -2,7 +2,7 @@
 // список инцидентов, а сколько их было относительно всего трафика, и как это распределено во времени.
 // Клик по строке открывает разбор: факторы с вкладом в решение (объяснение, которого требует ТЗ).
 
-import { openAct } from '../act.js';
+import { openAct, downloadActPdf } from '../act.js';
 import { getEvents, getRecent, getStats, getStatus } from '../api.js';
 import { stackedBars } from '../charts.js';
 import { factorName, isRule, signalName } from '../labels.js';
@@ -103,7 +103,9 @@ export function openEvent(e, thresholds) {
     e.block_suppressed ? h('dt', {}, 'Защита') : null,
     e.block_suppressed ? h('dd', {}, 'Блок заменён проверкой: защитный класс.') : null);
   openDrawer('Разбор решения', h('div', {}, e.summary ? h('p', { style: 'margin:0 0 14px;line-height:1.45' }, e.summary) : null, kv,
-    h('button', { class: 'btn ghost small', type: 'button', style: 'margin:10px 0', onclick: () => openAct(e).catch((err) => toast(err.message, true)) }, 'Сформировать акт для надзорного органа'),
+    h('div', { style: 'display:flex;gap:8px;margin:10px 0' },
+      h('button', { class: 'btn ghost small', type: 'button', onclick: () => openAct(e).catch((err) => toast(err.message, true)) }, 'Сформировать акт для надзорного органа'),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: () => downloadActPdf(e).catch((err) => toast(err.message, true)) }, 'Скачать PDF')),
     h('h3', { style: 'margin:18px 0 4px;font-size:14px' }, 'Факторы'),
     h('div', { class: 'muted', style: 'font-size:12px' }, 'вправо — повышает риск, влево — снижает'), contrib));
 }
